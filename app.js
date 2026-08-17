@@ -200,27 +200,28 @@ function makeLabelTexture(text, color = '#fff') {
 function makeConceptMesh(nd) {
   const isMao = nd.n === MAO_NAME;
   const isRef = nd.t === 'work' && !workMap.has(nd.n);  // 被引外部文献
-  const isLeaf = !isMao && !isRef && (degMap.get(nd.n) || 0) <= CONFIG.leafDegree; // 星等降噪
+  const isExt = isRef || nd.t === 'ghost';              // 外部节点（被引+无端点，合并处理）
+  const isLeaf = !isMao && !isExt && (degMap.get(nd.n) || 0) <= CONFIG.leafDegree; // 星等降噪
   let color = TYPE_COLOR[nd.t] || 0x8899bb;
   let scale = nd.s;
-  if (isMao) { color = 0xffd24d; scale = nd.s * 1.8; }        // 作者恒星：金色+放大
-  else if (isRef) { color = REF_COLOR; scale = nd.s * 0.8; }  // 被引文献：灰蓝+缩小
+  if (isMao) { color = 0xffd24d; scale = nd.s * 1.8; }        // 中心恒星：金色+放大
+  else if (isExt) { color = REF_COLOR; scale = nd.s * 0.8; }  // 外部节点：灰蓝+缩小
   else if (isLeaf) { scale = nd.s * CONFIG.leafSizeFactor; }  // 叶子概念：缩小
   const mat = new THREE.MeshPhongMaterial({
-    color, transparent: isRef || isLeaf,
-    opacity: isRef ? 0.9 : (isLeaf ? CONFIG.leafOpacity : 1),
+    color, transparent: isExt || isLeaf,
+    opacity: isExt ? 0.9 : (isLeaf ? CONFIG.leafOpacity : 1),
     emissive: new THREE.Color(color).multiplyScalar(isMao ? 0.75 : 0.45),
     emissiveIntensity: isMao ? 0.5 : (isLeaf ? 0.2 : 0.28), shininess: isMao ? 110 : 60 });
   const m = new THREE.Mesh(sphereGeo, mat);
   m.position.set(...nd.p);
   m.scale.setScalar(scale);
-  m.userData = { kind: 'concept', nd, isMao, isRef, baseScale: scale };
+  m.userData = { kind: 'concept', nd, isMao, isRef, isExt, baseScale: scale };
   conceptMeshes.push(m);
   meshByName.set(nd.n, m);
   scene.add(m);
 
-  // 非叶子概念：叠加染色光晕贴片（叶子不加，避免回糊）
-  if (!isMao && !isRef && !isLeaf) {
+  // 非叶子概念：叠加染色光晕贴片（叶子/外部节点不加，避免回糊）
+  if (!isMao && !isExt && !isLeaf) {
     addHalo(m, color, scale * CONFIG.haloSizeFactor, CONFIG.haloOpacity);
   }
 
@@ -417,9 +418,10 @@ function nodeVisible(vol) {
 }
 
 function updateVisibility() {
-  // 节点/篇目（毛泽东恒显），光晕随主体同步显隐
+  // 节点/篇目（中心恒星与跨卷枢纽恒显），光晕随主体同步显隐
   conceptMeshes.forEach(m => {
-    const v = m.userData.isMao || nodeVisible(m.userData.nd.vol);
+    const nd = m.userData.nd;
+    const v = m.userData.isMao || nodeVisible(nd.vol) || (nd.vol == null && !m.userData.isExt);
     m.visible = v;
     if (m.userData.halo) m.userData.halo.visible = v;
   });
@@ -525,8 +527,8 @@ function showTip(obj) {
   } else {
     const nd = obj.userData.nd;
     const col = '#' + new THREE.Color(TYPE_COLOR[nd.t] || 0x8899bb).getHexString();
-    if (obj.userData.isRef) {
-      tipEl.innerHTML = `<b style="color:#aab6d6">${nd.n}</b><br><span style="color:#9fb0d8">被引文献${nd.src ? ` · 见「${nd.src}」` : ''} · 点击查看</span>`;
+    if (obj.userData.isExt) {
+      tipEl.innerHTML = `<b style="color:#aab6d6">${nd.n}</b><br><span style="color:#9fb0d8">外部节点${nd.src ? ` · 见「${nd.src}」` : ''} · 点击查看</span>`;
     } else if (obj.userData.isMao) {
       tipEl.innerHTML = `<b style="color:#ffd24d">毛泽东</b><br><span style="color:#9fb0d8">全书唯一作者 · ${linksOf(nd.n).length} 条连接 · 点击查看</span>`;
     } else {
@@ -558,8 +560,8 @@ function showConceptPanel(nd) {
   tipLock = true;
   document.getElementById('pName').textContent = nd.n;
   const isMao = nd.n === MAO_NAME;
-  const isRef = nd.t === 'work' && !workMap.has(nd.n);
-  document.getElementById('pType').textContent = isMao ? '全书唯一作者' : (isRef ? '被引文献' : (TYPE_NAME[nd.t] || nd.t));
+  const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
+  document.getElementById('pType').textContent = isMao ? '全书唯一作者' : (isExt ? '外部节点' : (TYPE_NAME[nd.t] || nd.t));
   document.getElementById('pDeg').textContent = `${linksOf(nd.n).length} 连接`;
   document.getElementById('pDesc').textContent = isMao
     ? `这个知识宇宙的 ${DATA.nodes.length} 个概念、${DATA.links.length} 条关系，全部出自毛泽东一人之手。作为连接中枢，他的思想辐射到军事、党建、经济、哲学各星团。`
