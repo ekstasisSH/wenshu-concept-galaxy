@@ -445,13 +445,17 @@ function makeWorkPoints() {
   const pos = new Float32Array(n * 3), col = new Float32Array(n * 3),
         siz = new Float32Array(n), seed = new Float32Array(n);
   workBaseSize = new Float32Array(n);
+  // [B-Fix] 一次性算 maxCnt（性能 + 避免每次重建数组）
+  const maxCnt = Math.max(...list.map(x => x.cnt), 1);
   list.forEach((w, i) => {
     pos[i*3]   = w.p[0]; pos[i*3+1] = w.p[1]; pos[i*3+2] = w.p[2];
     const fc = new THREE.Color(fieldColor(w.f));   // 篇目色=领域色
     col[i*3]   = fc.r; col[i*3+1] = fc.g; col[i*3+2] = fc.b;
-    let d = w.s * 12;                              // [A1] size: w.s × 12（~10~60），明显大于概念点云
-    if (d < 6) d = 6;
-    workBaseSize[i] = d; siz[i] = d;
+    // [B-Fix] w.s 字段在 works 数组中不存在（取值为 0）→ 改用 w.cnt 驱动（1~80）
+    const r = CONFIG.workBase + (w.cnt / maxCnt) * (CONFIG.workMax - CONFIG.workBase);   // 6 ~ 12
+    const dia = r * 3.0;                                                                  // shader 是 diameter 语义
+    const sizeFinal = Math.max(dia, 18);                                                  // 18 ~ 36（明显大于概念点云）
+    workBaseSize[i] = sizeFinal; siz[i] = sizeFinal;
     seed[i] = (i * 0.6180339887 + 0.137) % 1;      // 与概念点相位错开防同步闪烁
     pt.nodes.push({ n: w.n });                     // 占位（避免统计错位，便于调试）
     // [A1] 二级 halo sprite（每颗篇目一张柔光晕，染色=领域色，加色混合）
@@ -461,7 +465,8 @@ function makeWorkPoints() {
       blending: THREE.AdditiveBlending,
       transparent: true, depthWrite: false, opacity: 0.6,
     }));
-    const haloScale = Math.max(w.s * 18, 28);      // 二级晕远大于主点（营造辐射感）
+    // [B-Fix] halo 同步从 r 派生（30~66），给主点 8x 辐射半径
+    const haloScale = Math.max(r * 8.0, 30);
     halo.scale.setScalar(haloScale);
     halo.position.set(w.p[0], w.p[1], w.p[2]);
     halo.userData = { vol: w.vol, f: w.f, idx: i };
