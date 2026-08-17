@@ -15,6 +15,20 @@
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
+<!-- 加载屏（数据就绪后淡出） -->
+<div id="splash" role="status" aria-label="加载中">
+  <div class="sp-logo">文枢 · 毛选概念宇宙</div>
+  <div class="sp-sub">一人一宇宙 · 卷 / 篇 / 概念 三层语义空间</div>
+  <div class="sp-bar"><i></i></div>
+  <div class="sp-status" id="spStatus">正在生成概念星系…</div>
+</div>
+
+<!-- 首次操作引导 -->
+<div id="guide">
+  拖拽旋转 · 滚轮缩放 · 右键平移<br>
+  <span>点击节点查看关系与溯源 · H 键隐藏界面</span>
+</div>
+
 <div id="hud">
   <div class="brand"><b>文枢 · 毛选概念宇宙</b><small>一人一宇宙 · 卷 / 篇 / 概念 三层语义空间</small></div>
   <div id="stat">加载中…</div>

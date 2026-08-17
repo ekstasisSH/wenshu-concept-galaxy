@@ -37,6 +37,7 @@ const CONFIG = {
   flowSpeed:    0.055,
   flowSize:     1.3,
   parallelGap:  8.0,          // 平行边偏移间距
+  topLabelCount: 12,          // Top N 概念常显锚点标签
   alpha:        0.45,         // 概念混合布局权重（与数据生成一致）
 };
 
@@ -204,6 +205,27 @@ function makeLabelTexture(text, color = '#fff') {
   // 第二层阴影让字更通透
   ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 10;
   return new THREE.CanvasTexture(c);
+}
+
+// ---------- Top12 概念常显锚点标签（连接度最高，排除毛泽东——恒星已有标签） ----------
+const topLabels = [];
+function buildTopLabels() {
+  const list = DATA.nodes
+    .filter(nd => nd.n !== MAO_NAME)
+    .sort((a, b) => (degMap.get(b.n) || 0) - (degMap.get(a.n) || 0))
+    .slice(0, CONFIG.topLabelCount);
+  list.forEach(nd => {
+    const vc = (nd.vol && DATA.vols[nd.vol]) ? DATA.vols[nd.vol] : 0xe8d9b0;
+    const lbl = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeLabelTexture(nd.n, '#e9edf5'), transparent: true, depthWrite: false }));
+    const size = Math.max(nd.s, 2);
+    lbl.position.set(nd.p[0], nd.p[1] + size * 2.8, nd.p[2]);
+    lbl.scale.set(Math.max(nd.n.length * 3.4, 14), 5.4, 1);
+    lbl.renderOrder = 3;
+    lbl.userData = { name: nd.n };
+    scene.add(lbl);
+    topLabels.push(lbl);
+  });
 }
 
 // ---------- 概念节点：视觉=点精灵云（星云质感），交互=隐形代理球（拾取/面板/飞行零改动） ----------
@@ -519,12 +541,22 @@ function init() {
     `${DATA.nodes.length} 概念 · ${DATA.works.length} 篇目 · ${DATA.links.length} 关系`;
 
   // 更新边可见性（初始：骨干显示，叶子隐藏）
+  buildTopLabels();          // Top12 概念常显锚点
   updateVisibility();
   animate();
 
+  // 加载完成：淡出启动屏；操作引导 6s 或首次交互后消失
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const sp = document.getElementById('splash');
+    if (sp) sp.classList.add('hide');
+    setTimeout(() => sp && sp.remove(), 700);
+  }));
+  setTimeout(() => hideGuide(), 6000);
+  renderer.domElement.addEventListener('pointerdown', hideGuide, { once: true });
+
   // 调试/验证句柄（供自动化测试）
   window.__dbg = {
-    conceptMeshes, workMeshes, edges,
+    conceptMeshes, workMeshes, edges, topLabels,
     flowN: { source: flowAttrs.source.length, develop: flowAttrs.develop.length, debate: flowAttrs.debate.length },
     mao: meshByName.get(MAO_NAME) || null,
     refCount: conceptMeshes.filter(m => m.userData.isRef).length,
@@ -547,6 +579,13 @@ function updateVisibility() {
     const v = nodeVisible(m.userData.w.vol);
     m.visible = v;
     if (m.userData.halo) m.userData.halo.visible = v;
+  });
+  // Top12 锚点标签随卷别筛选联动
+  topLabels.forEach(lbl => {
+    const nd = nodeMap.get(lbl.userData.name);
+    if (!nd) return;
+    const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
+    lbl.visible = nodeVisible(nd.vol) || (nd.vol == null && !isExt);
   });
   // 边 + 粒子
   edges.forEach(ln => {
@@ -838,6 +877,19 @@ function updateRotBtn() {
   document.getElementById('bRotate').textContent = controls.autoRotate ? '旋转：开' : '旋转：关';
 }
 
+// 首次操作引导隐藏
+function hideGuide() {
+  const g = document.getElementById('guide');
+  if (g) g.classList.add('hide');
+}
+
+// H 键：截图模式（淡出全部 UI，保留布局；再按恢复）
+document.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    document.body.classList.toggle('ui-hidden');
+  }
+});
+
 // ================= 动画 =================
 const clock = new THREE.Clock();
 let elapsed = 0;
@@ -895,5 +947,7 @@ addEventListener('resize', () => {
 // 启动
 loadData().then(init).catch(e => {
   console.error(e);
+  const sp = document.getElementById('splash');
+  if (sp) { sp.classList.add('hide'); sp.remove(); }
   document.getElementById('stat').textContent = '数据加载失败：' + e.message;
 });
