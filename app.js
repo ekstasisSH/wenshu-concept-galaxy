@@ -787,7 +787,7 @@ function init() {
   setTimeout(() => hideGuide(), 6000);
   renderer.domElement.addEventListener('pointerdown', hideGuide, { once: true });
 
-  // 调试/验证句柄（供自动化测试）
+  // 调试/验证句柄（供自动化测试 + PPT 截图角度控制）
   window.__dbg = {
     conceptMeshes, workMeshes, edges, topLabels,
     flowN: { source: flowAttrs.source.length, develop: flowAttrs.develop.length, debate: flowAttrs.debate.length },
@@ -795,6 +795,8 @@ function init() {
     starPoints,             // [F] 恒星亮核 Points（断言：存在且 aSize>30）
     refCount: conceptMeshes.filter(m => m.userData.isRef).length,
     ui: { showConceptPanel, showWorkPanel, nodeMap, workMap },  // UI 截图验证钩子
+    // [PPT 截图] 相机/控件/intro/renderer 句柄（puppeteer 控角度用）
+    scene, camera, controls, renderer, intro, composer,
   };
 }
 
