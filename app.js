@@ -25,7 +25,10 @@ const CONFIG = {
   haloSizeFactor: 3.0,        // 节点光晕相对半径倍数
   haloOpacity:  0.45,         // 节点光晕透明度
   workBase:     6.0,          // 篇目星半径
-  workMax:      15.0,
+  workMax:      12.0,
+  workColor:    0xd8e0ee,     // 篇目星统一暖银白（卷别靠环+明度微差，避免与关系色撞车）
+  conceptColor: 0xe8edf5,     // 概念点统一星尘白
+  starScaleFactor: 2.8,       // 毛泽东恒星本体放大系数（相对 nd.s）
   workOpacity:  0.75,
   arcBend:      0.24,         // 弧线垂直拱起系数
   arcBundle:    0.5,          // 控制点向中心收缩
@@ -47,6 +50,15 @@ const TYPE_NAME  = { concept: '概念', theory: '理论', scholar: '人物', wor
 const REL_COLOR  = { source: 0x4a90d9, develop: 0x3eb56b, debate: 0xd95a4a };
 const REL_NAME   = { source: '来源', develop: '发展', debate: '争论' };
 const REL_TYPES  = ['source', 'develop', 'debate'];
+
+// 卷别明度微差：统一色相家族内卷一最亮 → 卷四最暗（卷别主要靠环位置区分，颜色不再编码卷）
+const VOL_ORDER = ['第一卷', '第二卷', '第三卷', '第四卷'];
+function volumeTone(baseColor, vol) {
+  const c = new THREE.Color(baseColor);
+  const idx = vol ? VOL_ORDER.indexOf(vol) : -1;
+  if (idx >= 0) c.multiplyScalar(1.05 - idx * 0.035);
+  return c;
+}
 
 let DATA = null;
 const nodeMap = new Map();   // 概念名 -> 节点对象
@@ -235,12 +247,11 @@ let pickProxyMat = null;
 
 function conceptNodeColor(nd, isExt, isLeaf) {
   if (isExt) return new THREE.Color(REF_COLOR).multiplyScalar(0.7);
-  const vc = nd.vol && DATA.vols[nd.vol];
-  const c = vc ? new THREE.Color(vc) : new THREE.Color(0xe8d9b0); // 跨卷枢纽：暖金白
-  c.lerp(new THREE.Color(0xffffff), 0.25);                        // 降饱和提亮（星尘感）
-  if (nd.t === 'theory') c.multiplyScalar(1.15);                  // 类型靠明度分层，不加色相
+  const c = volumeTone(CONFIG.conceptColor, nd.vol);   // 统一星尘白 + 卷明度微差（不再继承卷色相）
+  c.lerp(new THREE.Color(0xffffff), 0.28);             // 提亮（星尘感）
+  if (nd.t === 'theory') c.multiplyScalar(1.15);       // 类型靠明度分层，不加色相
   else if (nd.t === 'scholar') c.multiplyScalar(0.9);
-  if (isLeaf) c.multiplyScalar(CONFIG.leafOpacity * 0.9);         // 叶子降噪=降亮（加色混合）
+  if (isLeaf) c.multiplyScalar(CONFIG.leafOpacity * 0.9); // 叶子降噪=降亮（加色混合）
   return c;
 }
 
@@ -356,7 +367,7 @@ function ptHoverTick() {
 
 function makeCenterStar(nd) {   // 中心恒星：唯一实体概念球（金色+光晕+常显标签）
   const color = 0xffd24d;
-  const scale = nd.s * 1.8;
+  const scale = nd.s * CONFIG.starScaleFactor;
   const mat = new THREE.MeshPhongMaterial({
     color, emissive: new THREE.Color(color).multiplyScalar(0.75),
     emissiveIntensity: 0.5, shininess: 110 });
@@ -389,10 +400,10 @@ function makeCenterStar(nd) {   // 中心恒星：唯一实体概念球（金色
 function makeWorkMesh(w) {
   const maxCnt = Math.max(...DATA.works.map(x => x.cnt), 1);
   const r = CONFIG.workBase + (w.cnt / maxCnt) * (CONFIG.workMax - CONFIG.workBase);
-  const col = DATA.vols[w.vol] || 0xaab6d6;
+  const col = volumeTone(CONFIG.workColor, w.vol);   // 统一暖银白 + 卷明度微差
   const mat = new THREE.MeshPhongMaterial({
-    color: new THREE.Color(col), transparent: true, opacity: CONFIG.workOpacity,
-    emissive: new THREE.Color(col).multiplyScalar(0.55), emissiveIntensity: 0.5, shininess: 90 });
+    color: col, transparent: true, opacity: CONFIG.workOpacity,
+    emissive: col.clone().multiplyScalar(0.55), emissiveIntensity: 0.5, shininess: 90 });
   const m = new THREE.Mesh(sphereGeo, mat);
   m.position.set(...w.p);
   m.scale.setScalar(r);
@@ -687,8 +698,7 @@ function showTip(obj) {
     tipEl.innerHTML = `<b style="color:${col}">${w.n}</b><br><span style="color:#9fb0d8">篇目 · ${w.vol} · ${w.cnt} 概念 · 点击查看</span>`;
   } else {
     const nd = obj.userData.nd;
-    const vc = (nd.vol && DATA.vols[nd.vol]) ? DATA.vols[nd.vol] : 0xe8d9b0;  // 概念色=卷色
-    const col = '#' + new THREE.Color(vc).getHexString();
+    const col = '#' + volumeTone(CONFIG.conceptColor, nd.vol).getHexString();  // 概念色=星尘白
     if (obj.userData.isExt) {
       tipEl.innerHTML = `<b style="color:#aab6d6">${nd.n}</b><br><span style="color:#9fb0d8">外部节点${nd.src ? ` · 见「${nd.src}」` : ''} · 点击查看</span>`;
     } else if (obj.userData.isMao) {
@@ -798,11 +808,12 @@ function buildVolLegend() {
   all.innerHTML = `<span class="dot" style="background:#fff;color:#fff"></span><span class="lbl">全部卷</span>`;
   all.addEventListener('click', () => onVolClick('', all));
   legend.appendChild(all);
-  for (const [vol, col] of Object.entries(DATA.vols)) {
+  for (const vol of VOL_ORDER) {
     const el = document.createElement('div');
     el.className = 'it vol';
     el.dataset.vol = vol;
-    el.innerHTML = `<span class="dot" style="background:${col};color:${col}"></span><span class="lbl">${vol}</span>`;
+    const hex = '#' + volumeTone(CONFIG.workColor, vol).getHexString();
+    el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${vol}</span>`;
     el.addEventListener('click', () => onVolClick(vol, el));
     legend.appendChild(el);
   }
