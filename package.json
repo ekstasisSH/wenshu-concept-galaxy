@@ -1,0 +1,13 @@
+{
+  "name": "concept-galaxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "python -m http.server 8080",
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

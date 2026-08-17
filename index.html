@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>文枢 · 毛选概念宇宙（3D 漫游）</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="hud">
+  <div class="brand"><b>文枢 · 毛选概念宇宙</b><small>一人一宇宙 · 卷 / 篇 / 概念 三层语义空间</small></div>
+  <div id="stat">加载中…</div>
+</div>
+
+<div id="legend">
+  <div class="g">节点类型</div>
+  <div class="it"><span class="dot" style="background:#7fb0ff;color:#7fb0ff"></span><span class="lbl">概念 concept</span></div>
+  <div class="it"><span class="dot" style="background:#c97bd8;color:#c97bd8"></span><span class="lbl">理论 theory</span></div>
+  <div class="it"><span class="dot" style="background:#5ad1a0;color:#5ad1a0"></span><span class="lbl">人物 scholar</span></div>
+  <div class="it"><span class="dot" style="background:#aab6d6;color:#aab6d6"></span><span class="lbl">篇目 work ⭐</span></div>
+  <div class="it"><span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">被引文献 cited</span></div>
+  <div class="g">关系类型（点击筛选）</div>
+  <div class="it sel" data-ty="source"><span class="line" style="background:#4a90d9;color:#4a90d9"></span><span class="lbl">来源 source</span></div>
+  <div class="it sel" data-ty="develop"><span class="line" style="background:#3eb56b;color:#3eb56b"></span><span class="lbl">发展 develop</span></div>
+  <div class="it sel" data-ty="debate"><span class="line" style="background:#d95a4a;color:#d95a4a"></span><span class="lbl">争论 debate</span></div>
+  <div class="g">卷别（点击筛选）</div>
+</div>
+
+<div id="search">
+  <input id="s" type="text" placeholder="搜索概念 / 篇目 / 人物…" />
+  <div class="hint">回车聚焦 · 拖拽旋转 · 滚轮缩放 · 右键平移</div>
+</div>
+
+<div id="btns">
+  <button id="bRotate">旋转：开</button>
+  <button id="bReset">重置视角</button>
+</div>
+
+<div id="panel">
+  <div class="hd">
+    <span id="close">✕</span>
+    <h3 id="pName"></h3>
+    <span class="tag" id="pType"></span><span class="tag" id="pDeg"></span>
+    <div class="desc" id="pDesc"></div>
+  </div>
+  <div class="body">
+    <div class="cnt" id="pCnt"></div>
+    <div id="pRels"></div>
+  </div>
+</div>
+
+<div id="tip"></div>
+<div id="gl"></div>
+
+<!--__DATA__-->
+<script type="module" src="./app.js"></script>
+</body>
+</html>
