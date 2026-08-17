@@ -925,7 +925,7 @@ function showTip(obj) {
     if (obj.userData.isExt) {
       tipEl.innerHTML = `<b style="color:#aab6d6">${nd.n}</b><br><span style="color:#9fb0d8">外部节点${nd.src ? ` · 见「${nd.src}」` : ''} · 点击查看</span>`;
     } else if (obj.userData.isMao) {
-      tipEl.innerHTML = `<b style="color:#ffd24d">毛泽东</b><br><span style="color:#9fb0d8">全书唯一作者 · ${linksOf(nd.n).length} 条连接 · 点击查看</span>`;
+      tipEl.innerHTML = `<b style="color:#ffd24d">毛泽东</b><br><span style="color:#9fb0d8">作者 · ${linksOf(nd.n).length} 条连接 · 点击查看</span>`;
     } else {
       tipEl.innerHTML = `<b style="color:${col}">${nd.n}</b><br><span style="color:#9fb0d8">${TYPE_NAME[nd.t]||''} · ${linksOf(nd.n).length} 连接 · 点击查看</span>`;
     }
@@ -956,7 +956,7 @@ function showConceptPanel(nd) {
   document.getElementById('pName').textContent = nd.n;
   const isMao = nd.n === MAO_NAME;
   const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-  document.getElementById('pType').textContent = isMao ? '全书唯一作者' : (isExt ? '外部节点' : (TYPE_NAME[nd.t] || nd.t) + (nd.f ? ' · ' + nd.f.slice(2) : ''));
+  document.getElementById('pType').textContent = isMao ? '作者' : (isExt ? '外部节点' : (TYPE_NAME[nd.t] || nd.t) + (nd.f ? ' · ' + nd.f.slice(2) : ''));
   document.getElementById('pDeg').textContent = `${linksOf(nd.n).length} 连接`;
   document.getElementById('pDesc').textContent = isMao
     ? `这个知识宇宙的 ${DATA.nodes.length} 个概念、${DATA.links.length} 条关系，全部出自毛泽东一人之手。作为连接中枢，他的思想辐射到军事、党建、经济、哲学各星团。`
