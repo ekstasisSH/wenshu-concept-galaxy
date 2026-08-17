@@ -45,6 +45,12 @@ const d = await page.evaluate(() => {
         const lk = e.userData.lk; return lk.s === '毛泽东' || lk.t === '毛泽东';
       }).length,
     } : null,
+    // [F] 恒星点精灵亮核
+    starPt: dbg.starPoints ? {
+      count: dbg.starPoints.geometry.attributes.position.count,
+      aSize: +dbg.starPoints.geometry.attributes.aSize.array[0].toFixed(1),
+      bright: dbg.starPoints.material.uniforms.uBright.value,
+    } : null,
     ringAvg,
     satP95: ds.length ? +ds[Math.floor(ds.length * 0.95)].toFixed(1) : null,
     // 新增：Top12 / 加载屏 / 引导 / H 键
@@ -76,8 +82,9 @@ const hOk = h1 && !h2;
 console.log(`日心断言: 中心r=${d.mao?.r} 四环=${ringOk ? '✓' : '✗ ' + JSON.stringify(d.ringAvg)} 卫星p95=${d.satP95}`);
 console.log(`新增断言: Top12=${topOk ? '✓' : '✗ ' + d.topLabels} 加载屏=${splashOk ? '✓' : '✗ ' + d.splash} 引导=${guideOk ? '✓' : '✗ ' + d.guide}`);
 
-const ok = d.concepts === 1275 && d.works === 137 && d.refCount > 0 && d.mao && d.mao.hasHalo && d.mao.hasLabel && d.mao.color === '#ffd24d' && helioOk && topOk && splashOk && guideOk && hOk;
-console.log(ok ? '✅ 数值验证全部通过（含日心 + Top12 + 加载屏 + 引导 + H键）' : '❌ 有断言失败');
+const ok = d.concepts === 1275 && d.works === 137 && d.refCount > 0 && d.mao && d.mao.hasHalo && d.mao.hasLabel && d.mao.color === '#ffd24d' && helioOk && topOk && splashOk && guideOk && hOk && d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30;
+console.log(`[F] 恒星亮核: count=${d.starPt?.count} aSize=${d.starPt?.aSize} uBright=${d.starPt?.bright} ${(d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30) ? '✓' : '✗'}`);
+console.log(ok ? '✅ 数值验证全部通过（含日心 + Top12 + 加载屏 + 引导 + H键 + 恒星亮核）' : '❌ 有断言失败');
 await page.screenshot({ path: 'shot_m4.png' });
 await browser.close();
 process.exit(ok ? 0 : 1);

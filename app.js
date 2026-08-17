@@ -28,7 +28,13 @@ const CONFIG = {
   workMax:      12.0,
   workColor:    0xd8e0ee,     // 篇目星统一暖银白（卷别靠环+明度微差，避免与关系色撞车）
   conceptColor: 0xe8edf5,     // 概念点统一星尘白
-  starScaleFactor: 2.8,       // 毛泽东恒星本体放大系数（相对 nd.s）
+  // [F] 恒星点精灵化：亮核 aSize/亮度 + 光晕/标签参数（替代原 starScaleFactor 实体球缩放）
+  starPointSize: 62,          // 恒星亮核 aSize（世界直径语义，高斯衰减后视觉≈40px@900p）
+  starBright:    2.2,         // 恒星 uBright（>概念1.9 >篇目1.6，"太阳=最亮光源"）
+  starHaloScale: 80,          // 恒星 halo sprite 世界 scale（原 scale×4.8≈83.3）
+  starHaloOpacity: 0.85,      // 恒星 halo 透明度（原值）
+  starPickR:     22,          // 恒星拾取代理球半径（hover 放大目标 baseScale）
+  starLabelY:    56,          // 恒星标签 Y 偏移（原 scale×3.2≈55.6）
   workOpacity:  0.75,
   arcBend:      0.24,         // 弧线垂直拱起系数
   arcBundle:    0.5,          // 控制点向中心收缩
@@ -269,6 +275,9 @@ let workPoints = null;
 let workRingGroup = null;
 const workHaloSprites = [];     // 137 个二级 halo sprite（更新显隐）
 let workBaseSize = null;        // 137 项基础像素尺寸（卷筛选时置 0）
+// [F] 中心恒星：视觉=点精灵亮核（Points），交互=不可见金色代理球；亮核 hover 放大走 aSize lerp
+let starPoints = null;
+let starBaseSize = 0;
 
 function conceptNodeColor(nd, isExt, isLeaf) {
   if (isExt) return new THREE.Color(REF_COLOR).multiplyScalar(0.7);
@@ -355,8 +364,9 @@ function buildConceptPoints() {
 function updatePointScale() {
   if (!conceptPoints) return;
   // 世界尺寸→像素：height/2 / tan(fov/2)（含 pixelRatio）
-  conceptPoints.material.uniforms.uScale.value =
-    renderer.domElement.height * 0.5 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const v = renderer.domElement.height * 0.5 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  conceptPoints.material.uniforms.uScale.value = v;
+  if (starPoints) starPoints.material.uniforms.uScale.value = v;   // [F] 恒星亮核同步
 }
 
 // 卷别筛选 → 点云显隐（aSize 置 0 即隐藏且不可拾取前置由代理 visible 逻辑配合）
@@ -389,32 +399,84 @@ function ptHoverTick() {
   if (dirty) attr.needsUpdate = true;
 }
 
-function makeCenterStar(nd) {   // 中心恒星：唯一实体概念球（金色+光晕+常显标签）
+// [F] 恒星亮核 hover 平滑放大（1.15×，lerp 趋近；与代理球 enlarged 动画并行，互不干扰）
+function starHoverTick() {
+  if (!starPoints) return;
+  const attr = starPoints.geometry.attributes.aSize;
+  const target = (hovered && hovered.userData.isMao) ? starBaseSize * 1.15 : starBaseSize;
+  const v = attr.array[0];
+  if (Math.abs(v - target) > 0.05) {
+    attr.array[0] += (target - v) * 0.2;
+    attr.needsUpdate = true;
+  }
+}
+
+function makeCenterStar(nd) {   // [F] 中心恒星：点精灵亮核（金色，恒显）+ 光晕 + 常显标签；代理球承载拾取/hover/面板
   const color = 0xffd24d;
-  const scale = nd.s * CONFIG.starScaleFactor;
-  const mat = new THREE.MeshPhongMaterial({
-    color, emissive: new THREE.Color(color).multiplyScalar(0.75),
-    emissiveIntensity: 0.5, shininess: 110 });
-  const m = new THREE.Mesh(sphereGeo, mat);
+  const pos = new Float32Array(3), col = new Float32Array(3),
+        siz = new Float32Array(1), seed = new Float32Array(1);
+  new THREE.Color(color).toArray(col);
+  starBaseSize = CONFIG.starPointSize;
+  siz[0] = starBaseSize;
+  seed[0] = 0.5;                                       // 相位固定（恒星=恒定光源，微闪烁 3%）
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aColor',  new THREE.BufferAttribute(col, 3));
+  g.setAttribute('aSize',   new THREE.BufferAttribute(siz, 1));
+  g.setAttribute('aSeed',   new THREE.BufferAttribute(seed, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uScale: { value: 800 }, uBright: { value: CONFIG.starBright } },
+    vertexShader: /* glsl */`
+      attribute vec3 aColor; attribute float aSize; attribute float aSeed;
+      uniform float uTime; uniform float uScale;
+      varying vec3 vColor; varying float vTw;
+      void main() {
+        if (aSize < 0.001) { gl_Position = vec4(2.0,2.0,2.0,1.0); gl_PointSize = 0.0; return; }
+        vColor = aColor;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = clamp(aSize * uScale / -mv.z, 3.0, 120.0);
+        vTw = 0.97 + 0.03 * sin(uTime * 0.6 + aSeed * 6.2831853);   // 微闪烁：太阳稳定不眨
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform float uBright;
+      varying vec3 vColor; varying float vTw;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.06, d);
+        if (a < 0.02) discard;
+        gl_FragColor = vec4(vColor * uBright, a * vTw);
+      }`,
+  });
+  starPoints = new THREE.Points(g, mat);
+  starPoints.frustumCulled = false;
+  starPoints.position.set(...nd.p);
+  scene.add(starPoints);
+
+  // 拾取代理球（不可见；raycast 不检查 visible，仍可命中——与 137 篇目星同机制）
+  const pickR = CONFIG.starPickR;
+  const m = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 }));
   m.position.set(...nd.p);
-  m.scale.setScalar(scale);
-  m.userData = { kind: 'concept', nd, isMao: true, isRef: false, isExt: false, baseScale: scale };
+  m.scale.setScalar(pickR);
+  m.visible = false;
+  m.userData = { kind: 'concept', nd, isMao: true, isRef: false, isExt: false, baseScale: pickR, ptIndex: -1 };
   conceptMeshes.push(m);
   meshByName.set(nd.n, m);
   scene.add(m);
 
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
     map: makeHaloTexture(), blending: THREE.AdditiveBlending,
-    transparent: true, depthWrite: false, opacity: 0.85 }));
+    transparent: true, depthWrite: false, opacity: CONFIG.starHaloOpacity }));
   halo.position.copy(m.position);
-  halo.scale.setScalar(scale * 4.8);
+  halo.scale.setScalar(CONFIG.starHaloScale);
   halo.renderOrder = 2;
   scene.add(halo);
   m.userData.halo = halo;
 
   const lbl = new THREE.Sprite(new THREE.SpriteMaterial({
     map: makeLabelTexture('毛泽东', '#ffe9a8'), transparent: true, depthWrite: false }));
-  lbl.position.set(m.position.x, m.position.y + scale * 3.2, m.position.z);
+  lbl.position.set(m.position.x, m.position.y + CONFIG.starLabelY, m.position.z);
   lbl.scale.set(42, 13, 1);
   lbl.renderOrder = 3;
   scene.add(lbl);
@@ -730,6 +792,7 @@ function init() {
     conceptMeshes, workMeshes, edges, topLabels,
     flowN: { source: flowAttrs.source.length, develop: flowAttrs.develop.length, debate: flowAttrs.debate.length },
     mao: meshByName.get(MAO_NAME) || null,
+    starPoints,             // [F] 恒星亮核 Points（断言：存在且 aSize>30）
     refCount: conceptMeshes.filter(m => m.userData.isRef).length,
     ui: { showConceptPanel, showWorkPanel, nodeMap, workMap },  // UI 截图验证钩子
   };
@@ -1147,7 +1210,9 @@ function animate() {
 
   if (conceptPoints) conceptPoints.material.uniforms.uTime.value = elapsed;
   if (workPoints) workPoints.material.uniforms.uTime.value = elapsed;   // [A1]
+  if (starPoints) starPoints.material.uniforms.uTime.value = elapsed;   // [F] 恒星亮核
   ptHoverTick();
+  starHoverTick();            // [F] 恒星亮核 hover 放大
   flowTick(elapsed);
   composer.render();
 }
