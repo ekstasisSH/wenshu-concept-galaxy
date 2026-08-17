@@ -1,5 +1,5 @@
 /**
- * 文枢 · 毛选概念宇宙 — 主逻辑
+ * 文枢 · 知识库具象化演示 — 主逻辑
  * 开发版：fetch data/galaxy_data.json；构建版：window.__GALAXY_DATA__ 内联
  */
 import * as THREE from './vendor/three.module.js';
