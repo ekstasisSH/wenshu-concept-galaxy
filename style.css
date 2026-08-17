@@ -75,6 +75,12 @@ html, body {
   margin: 10px 2px 4px; opacity: .85;
 }
 #legend .g:first-child { margin-top: 0; }
+#legend .all {
+  color: var(--gold-soft); text-decoration: none; font-size: 10.5px;
+  letter-spacing: .05em; cursor: pointer; opacity: .85;
+  transition: opacity .15s, color .15s;
+}
+#legend .all:hover { opacity: 1; color: var(--gold); }
 .it {
   display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
   padding: 1px 6px; border-radius: 7px; transition: background .15s, opacity .15s;
