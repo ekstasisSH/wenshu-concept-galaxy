@@ -71,6 +71,7 @@ const FIELD_COLOR = {
   '五.思想政治工作和文化工作': 0xd08cf0,
   '六.党的建设':               0xf06b8a,
   '七.活的灵魂':               0x8fc9ff,
+  'cross':                     0xf2ead8,   // 跨领域枢纽（暖白=贯穿七领域意象）
 };
 const FIELD_GRAY = 0x9aa7c0;   // 未归类（附录/外部）
 function fieldColor(f) { return FIELD_COLOR[f] || FIELD_GRAY; }
@@ -359,8 +360,7 @@ function updateConceptPointVisibility() {
   const attr = conceptPoints.geometry.attributes.aSize;
   for (let i = 0; i < pt.nodes.length; i++) {
     const nd = pt.nodes[i];
-    const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-    const vis = nodeVisible(nd.vol) && nodeFieldVisible(nd.f, isExt);
+    const vis = nodeVisible(nd.vol) && nodeFieldVisible(nd.f);
     attr.array[i] = vis ? pt.baseSize[i] : 0;
   }
   attr.needsUpdate = true;
@@ -603,9 +603,8 @@ let focusName = null;
 function nodeVisible(vol) {
   return !vol || state.volOn[vol] !== false;   // 无卷概念恒显；卷缺失视为选中
 }
-function nodeFieldVisible(f, isExt) {
-  if (!f) return isExt ? state.fieldOn[''] !== false : true;   // 跨卷枢纽恒显；ext 归"未归类"行
-  return state.fieldOn[f] !== false;
+function nodeFieldVisible(f) {
+  return state.fieldOn[f] !== false;   // f='cross'→跨领域枢纽行；f=''→外部文献行；领域→对应行
 }
 
 function updateVisibility() {
@@ -613,7 +612,7 @@ function updateVisibility() {
   updateConceptPointVisibility();
   // 篇目（网格实体），光晕随主体同步显隐
   workMeshes.forEach(m => {
-    const v = nodeVisible(m.userData.w.vol) && nodeFieldVisible(m.userData.w.f, false);
+    const v = nodeVisible(m.userData.w.vol) && nodeFieldVisible(m.userData.w.f);
     m.visible = v;
     if (m.userData.halo) m.userData.halo.visible = v;
   });
@@ -621,18 +620,15 @@ function updateVisibility() {
   topLabels.forEach(lbl => {
     const nd = nodeMap.get(lbl.userData.name);
     if (!nd) return;
-    const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-    lbl.visible = nodeVisible(nd.vol) && nodeFieldVisible(nd.f, isExt);
+    lbl.visible = nodeVisible(nd.vol) && nodeFieldVisible(nd.f);
   });
   // 边 + 粒子
   edges.forEach(ln => {
     const { lk } = ln.userData;
     const relOn = state.relOn[lk.ty];
     const s = nodeMap.get(lk.s), t = nodeMap.get(lk.t);
-    const sExt = s && ((s.t === 'work' && !workMap.has(s.n)) || s.t === 'ghost');
-    const tExt = t && ((t.t === 'work' && !workMap.has(t.n)) || t.t === 'ghost');
-    const volOn = nodeVisible(s?.vol) && nodeFieldVisible(s?.f, sExt)
-               && nodeVisible(t?.vol) && nodeFieldVisible(t?.f, tExt);
+    const volOn = nodeVisible(s?.vol) && nodeFieldVisible(s?.f)
+               && nodeVisible(t?.vol) && nodeFieldVisible(t?.f);
     const isFocus = focusName && (lk.s === focusName || lk.t === focusName);
     ln.visible = relOn && volOn && (lk.bb || isFocus);
     if (ln.visible) {
@@ -837,19 +833,19 @@ function buildLegend() {
     return d;
   };
 
-  // 1. 领域（多选，默认全选）
+  // 1. 领域（7 领域 + 跨领域枢纽 + 外部文献，多选，默认全选）
   legend.appendChild(mkHead('领域', onFieldAll));
   for (const [f, c] of Object.entries(FIELD_COLOR)) {
     const hex = '#' + new THREE.Color(c).getHexString();
     const el = mkIt('it fld sel');
-    el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f.slice(2)}</span>`;
+    el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f === 'cross' ? '跨领域枢纽' : f.slice(2)}</span>`;
     el.addEventListener('click', () => onFieldClick(f, el));
     legend.appendChild(el);
   }
-  const un = mkIt('it fld sel');
-  un.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">未归类</span>`;
-  un.addEventListener('click', () => onFieldClick('', un));
-  legend.appendChild(un);
+  const ext = mkIt('it fld sel');
+  ext.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">外部文献</span>`;
+  ext.addEventListener('click', () => onFieldClick('', ext));
+  legend.appendChild(ext);
 
   // 2. 卷别（多选，默认全选）
   legend.appendChild(mkHead('卷别', onVolAll));

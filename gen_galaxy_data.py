@@ -25,6 +25,7 @@ rels = g['relationships']
 name2ent = {e['name']: e for e in ents}
 # 篇目→领域映射（历史决议七大领域：六大组成部分+活的灵魂，source: 00_研究总纲/07_毛选各卷目录初步梳理）
 field_map = json.load(open('data/field_map.json', encoding='utf-8'))
+field_map['附录：关于若干历史问题的决议'] = '六.党的建设'  # 附录归党的建设（覆盖旧空值）
 
 ALPHA = 0.45   # 概念自由语义权重：0=贴篇目 1=纯语义
 RADIUS = 170.0 # 星系半径
@@ -190,16 +191,20 @@ nodes = []
 for i, n in enumerate(order):
     ent = name2ent.get(n)
     d = deg.get(n, 0)
+    t = ent.get('type', 'ghost') if ent else 'ghost'
+    is_ext = t == 'ghost' or (t == 'work' and n not in work2idx)  # 外部文献/幽灵
+    # f 值域：7 领域（继承主篇目）｜'cross' 跨领域枢纽｜'' 外部文献
+    f = field_map.get(con_work[i], '') if con_work[i] else ('cross' if not is_ext else '')
     nodes.append({
         'n': n,
-        't': ent.get('type', 'ghost') if ent else 'ghost',
+        't': t,
         'p': [round(float(x), 2) for x in con_pos[i]],
         's': round(1.2 + (d / max_deg) * 5.0, 2),
         'd': (ent.get('description', '') if ent else '')[:90],
         'vol': con_vol[i],
         'anch': fmt_anchor(con_anch[i]),
         'src': con_work[i],
-        'f': field_map.get(con_work[i], '') if con_work[i] else '',  # 领域（继承主篇目）
+        'f': f,
     })
 
 # ---------- 7. 篇目星 ----------
