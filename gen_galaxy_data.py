@@ -23,6 +23,8 @@ vecs = np.load(f'{BASE}/vectors.npy')  # (1402, 1024)
 ents = g['entities']
 rels = g['relationships']
 name2ent = {e['name']: e for e in ents}
+# 篇目→领域映射（历史决议七大领域：六大组成部分+活的灵魂，source: 00_研究总纲/07_毛选各卷目录初步梳理）
+field_map = json.load(open('data/field_map.json', encoding='utf-8'))
 
 ALPHA = 0.45   # 概念自由语义权重：0=贴篇目 1=纯语义
 RADIUS = 170.0 # 星系半径
@@ -197,6 +199,7 @@ for i, n in enumerate(order):
         'vol': con_vol[i],
         'anch': fmt_anchor(con_anch[i]),
         'src': con_work[i],
+        'f': field_map.get(con_work[i], '') if con_work[i] else '',  # 领域（继承主篇目）
     })
 
 # ---------- 7. 篇目星 ----------
@@ -214,6 +217,7 @@ for w in works:
         'p': [round(float(x), 2) for x in work_pos[w]],
         'desc': work_desc.get(w, '')[:80],
         'cnt': n_c,
+        'f': field_map.get(w, ''),
     })
 
 # ---------- 8. 关系：backbone + 平行边 ----------

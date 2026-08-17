@@ -32,13 +32,15 @@ const CONFIG = {
   workOpacity:  0.75,
   arcBend:      0.24,         // 弧线垂直拱起系数
   arcBundle:    0.5,          // 控制点向中心收缩
-  arcBackboneOp:0.30,         // 骨干边基础透明度
-  arcFocusOp:   0.85,         // 聚焦边透明度
+  relStyle: {                 // 关系强度：色相不再编码类型（连线=星体色），改亮度+粒子密度
+    source: { op: 0.55, flow: 12, size: 1.4 },   // 来源：最亮最显
+    develop: { op: 0.40, flow: 9,  size: 1.3 },  // 发展：中等
+    debate:  { op: 0.25, flow: 6,  size: 1.2 },  // 争论：最暗最隐（双向粒子保留）
+  },
+  arcFocusOp:   0.9,          // 聚焦边透明度
   arcFadeExp:   0.7,          // 弧线头尾渐变指数（越大衰减越窄）
   arcFadeMin:   0.10,         // 弧线端点最低亮度保留
-  flowPerLink:  12,           // 每条边粒子数
   flowSpeed:    0.055,
-  flowSize:     1.3,
   parallelGap:  8.0,          // 平行边偏移间距
   topLabelCount: 12,          // Top N 概念常显锚点标签
   alpha:        0.45,         // 概念混合布局权重（与数据生成一致）
@@ -59,6 +61,19 @@ function volumeTone(baseColor, vol) {
   if (idx >= 0) c.multiplyScalar(1.05 - idx * 0.035);
   return c;
 }
+
+// 领域配色（历史决议七大领域：六大组成部分 + 活的灵魂）——星体与连线同色，表达"星团社群"
+const FIELD_COLOR = {
+  '一.新民主主义革命':         0xff8a6b,
+  '二.社会主义革命和建设':     0x5ec8f0,
+  '三.革命军队和军事战略':     0x7bd88a,
+  '四.政策和策略':             0xffcf5e,
+  '五.思想政治工作和文化工作': 0xd08cf0,
+  '六.党的建设':               0xf06b8a,
+  '七.活的灵魂':               0x8fc9ff,
+};
+const FIELD_GRAY = 0x9aa7c0;   // 未归类（附录/外部）
+function fieldColor(f) { return FIELD_COLOR[f] || FIELD_GRAY; }
 
 let DATA = null;
 const nodeMap = new Map();   // 概念名 -> 节点对象
@@ -247,8 +262,8 @@ let pickProxyMat = null;
 
 function conceptNodeColor(nd, isExt, isLeaf) {
   if (isExt) return new THREE.Color(REF_COLOR).multiplyScalar(0.7);
-  const c = volumeTone(CONFIG.conceptColor, nd.vol);   // 统一星尘白 + 卷明度微差（不再继承卷色相）
-  c.lerp(new THREE.Color(0xffffff), 0.28);             // 提亮（星尘感）
+  const c = new THREE.Color(fieldColor(nd.f));          // 领域色（星团内与篇目星同色系）
+  c.lerp(new THREE.Color(0xffffff), 0.35);             // 降饱和提亮（星尘感）
   if (nd.t === 'theory') c.multiplyScalar(1.15);       // 类型靠明度分层，不加色相
   else if (nd.t === 'scholar') c.multiplyScalar(0.9);
   if (isLeaf) c.multiplyScalar(CONFIG.leafOpacity * 0.9); // 叶子降噪=降亮（加色混合）
@@ -400,7 +415,7 @@ function makeCenterStar(nd) {   // 中心恒星：唯一实体概念球（金色
 function makeWorkMesh(w) {
   const maxCnt = Math.max(...DATA.works.map(x => x.cnt), 1);
   const r = CONFIG.workBase + (w.cnt / maxCnt) * (CONFIG.workMax - CONFIG.workBase);
-  const col = volumeTone(CONFIG.workColor, w.vol);   // 统一暖银白 + 卷明度微差
+  const col = new THREE.Color(fieldColor(w.f));   // 篇目星=领域色（历史决议七大领域）
   const mat = new THREE.MeshPhongMaterial({
     color: col, transparent: true, opacity: CONFIG.workOpacity,
     emissive: col.clone().multiplyScalar(0.55), emissiveIntensity: 0.5, shininess: 90 });
@@ -439,7 +454,8 @@ function makeArc(lk) {
   const B = new THREE.Vector3(...(nodeMap.get(lk.t)?.p || [0,0,0]));
   if (A.distanceToSquared(B) < 4) return null;
   const C = arcControl(A, B, lk.po || 0);
-  const col = REL_COLOR[lk.ty] || 0x666;
+  const fA = nodeMap.get(lk.s)?.f || nodeMap.get(lk.t)?.f || '';  // 连线色=星体色（源端领域）
+  const col = fieldColor(fA);
 
   // 静态弧线（顶点色随 t 头尾渐隐，加色混合让暗端自然消失）
   const SEG = 24, pts = [], cols = [];
@@ -456,25 +472,26 @@ function makeArc(lk) {
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
   let mat;
+  const relOp = CONFIG.relStyle[lk.ty].op;   // 关系类型→亮度分层（色相已让给领域）
   if (lk.ty === 'debate') {
-    mat = new THREE.LineDashedMaterial({ vertexColors: true, transparent: true, opacity: CONFIG.arcBackboneOp,
+    mat = new THREE.LineDashedMaterial({ vertexColors: true, transparent: true, opacity: relOp,
       dashSize: 3.2, gapSize: 2.6, depthWrite: false, blending: THREE.AdditiveBlending });
     // LineDashedMaterial 需要 computeLineDistances
     const line = new THREE.Line(geo, mat);
     line.computeLineDistances();
   } else {
-    mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: CONFIG.arcBackboneOp,
+    mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: relOp,
       depthWrite: false, blending: THREE.AdditiveBlending });
   }
   const line = new THREE.Line(geo, mat);
   line.visible = lk.bb;   // 骨干默认显示，叶子隐藏
-  line.userData = { lk, focusOp: CONFIG.arcFocusOp, baseOp: CONFIG.arcBackboneOp };
+  line.userData = { lk, focusOp: CONFIG.arcFocusOp, baseOp: relOp };
   scene.add(line);
   edges.push(line);
 
-  // 流动粒子（debate 双向：一半反方向）
+  // 流动粒子（debate 双向：一半反方向；密度按关系强度分层）
   const cc = new THREE.Color(col);
-  const n = CONFIG.flowPerLink;
+  const n = CONFIG.relStyle[lk.ty].flow;
   for (let k = 0; k < n; k++) {
     const rev = (lk.ty === 'debate' && k >= n / 2) ? -1 : 1;
     flowAttrs[lk.ty].push({
@@ -498,7 +515,8 @@ for (const ty of REL_TYPES) {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const mat = new THREE.PointsMaterial({
-    size: CONFIG.flowSize, vertexColors: true, transparent: true, opacity: 0.6,
+    size: CONFIG.relStyle[ty].size, vertexColors: true, transparent: true,
+    opacity: { source: 0.75, develop: 0.6, debate: 0.45 }[ty],
     sizeAttenuation: true, depthWrite: false, blending: THREE.AdditiveBlending });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
@@ -548,6 +566,7 @@ function init() {
 
   // 卷别图例动态生成
   buildVolLegend();
+  buildFieldLegend();   // 领域图例（历史决议七大领域）
   document.getElementById('stat').textContent =
     `${DATA.nodes.length} 概念 · ${DATA.works.length} 篇目 · ${DATA.links.length} 关系`;
 
@@ -694,11 +713,11 @@ function showTip(obj) {
   const { kind } = obj.userData;
   if (kind === 'work') {
     const w = obj.userData.w;
-    const col = '#' + new THREE.Color(DATA.vols[w.vol] || 0xaab6d6).getHexString();
+    const col = '#' + new THREE.Color(fieldColor(w.f)).getHexString();
     tipEl.innerHTML = `<b style="color:${col}">${w.n}</b><br><span style="color:#9fb0d8">篇目 · ${w.vol} · ${w.cnt} 概念 · 点击查看</span>`;
   } else {
     const nd = obj.userData.nd;
-    const col = '#' + volumeTone(CONFIG.conceptColor, nd.vol).getHexString();  // 概念色=星尘白
+    const col = '#' + new THREE.Color(fieldColor(nd.f)).getHexString();  // 概念色=领域色
     if (obj.userData.isExt) {
       tipEl.innerHTML = `<b style="color:#aab6d6">${nd.n}</b><br><span style="color:#9fb0d8">外部节点${nd.src ? ` · 见「${nd.src}」` : ''} · 点击查看</span>`;
     } else if (obj.userData.isMao) {
@@ -733,7 +752,7 @@ function showConceptPanel(nd) {
   document.getElementById('pName').textContent = nd.n;
   const isMao = nd.n === MAO_NAME;
   const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-  document.getElementById('pType').textContent = isMao ? '全书唯一作者' : (isExt ? '外部节点' : (TYPE_NAME[nd.t] || nd.t));
+  document.getElementById('pType').textContent = isMao ? '全书唯一作者' : (isExt ? '外部节点' : (TYPE_NAME[nd.t] || nd.t) + (nd.f ? ' · ' + nd.f.slice(2) : ''));
   document.getElementById('pDeg').textContent = `${linksOf(nd.n).length} 连接`;
   document.getElementById('pDesc').textContent = isMao
     ? `这个知识宇宙的 ${DATA.nodes.length} 个概念、${DATA.links.length} 条关系，全部出自毛泽东一人之手。作为连接中枢，他的思想辐射到军事、党建、经济、哲学各星团。`
@@ -760,7 +779,7 @@ function showConceptPanel(nd) {
 function showWorkPanel(w) {
   tipLock = true;
   document.getElementById('pName').textContent = w.n;
-  document.getElementById('pType').textContent = `${w.vol} · 篇目`;
+  document.getElementById('pType').textContent = `${w.vol} · 篇目${w.f ? ' · ' + w.f.slice(2) : ''}`;
   document.getElementById('pDeg').textContent = `${w.cnt} 块`;
   document.getElementById('pDesc').textContent = w.desc || '';
   const inWorks = DATA.nodes.filter(nd => nd.src === w.n).slice(0, 30);
@@ -824,6 +843,27 @@ function onVolClick(vol, el) {
   document.querySelectorAll('#legend .it.vol').forEach(x => x.classList.remove('sel'));
   if (el) el.classList.add('sel');
   updateVisibility();
+}
+
+// 领域图例（历史决议七大领域）
+function buildFieldLegend() {
+  const legend = document.getElementById('legend');
+  const div = document.createElement('div');
+  div.style.marginTop = '9px'; div.style.marginBottom = '6px';
+  div.className = 'g';
+  div.textContent = '领域（历史决议·七大领域）';
+  legend.appendChild(div);
+  for (const [f, c] of Object.entries(FIELD_COLOR)) {
+    const hex = '#' + new THREE.Color(c).getHexString();
+    const el = document.createElement('div');
+    el.className = 'it';
+    el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f.slice(2)}</span>`;
+    legend.appendChild(el);
+  }
+  const g = document.createElement('div');
+  g.className = 'it';
+  g.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">未归类</span>`;
+  legend.appendChild(g);
 }
 
 // ================= 关系类型图例 =================
