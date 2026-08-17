@@ -453,8 +453,9 @@ function makeWorkPoints() {
     col[i*3]   = fc.r; col[i*3+1] = fc.g; col[i*3+2] = fc.b;
     // [B-Fix] w.s 字段在 works 数组中不存在（取值为 0）→ 改用 w.cnt 驱动（1~80）
     const r = CONFIG.workBase + (w.cnt / maxCnt) * (CONFIG.workMax - CONFIG.workBase);   // 6 ~ 12
-    const dia = r * 3.0;                                                                  // shader 是 diameter 语义
-    const sizeFinal = Math.max(dia, 18);                                                  // 18 ~ 36（明显大于概念点云）
+    // [C-Tune] 轻调：dia r*3.0 → r*2.4 钳 [16,28]（14.4~28.8，明显小于旧 18~36）
+    const dia = r * 2.4;
+    const sizeFinal = Math.min(Math.max(dia, 16), 28);
     workBaseSize[i] = sizeFinal; siz[i] = sizeFinal;
     seed[i] = (i * 0.6180339887 + 0.137) % 1;      // 与概念点相位错开防同步闪烁
     pt.nodes.push({ n: w.n });                     // 占位（避免统计错位，便于调试）
@@ -465,8 +466,8 @@ function makeWorkPoints() {
       blending: THREE.AdditiveBlending,
       transparent: true, depthWrite: false, opacity: 0.6,
     }));
-    // [B-Fix] halo 同步从 r 派生（30~66），给主点 8x 辐射半径
-    const haloScale = Math.max(r * 8.0, 30);
+    // [C-Tune] halo 倍率 8.0→4.5 钳 [25,50]（27~50，明显小于旧 30~66；halo:主点比 1.7~1.8→1.5~1.74）
+    const haloScale = Math.min(Math.max(r * 4.5, 25), 50);
     halo.scale.setScalar(haloScale);
     halo.position.set(w.p[0], w.p[1], w.p[2]);
     halo.userData = { vol: w.vol, f: w.f, idx: i };
