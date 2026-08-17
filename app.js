@@ -81,12 +81,15 @@ const workMap = new Map();   // 篇目名 -> 篇目对象
 const meshByName = new Map();// 场景mesh by name
 const degMap = new Map();    // 概念名 -> 连接度（星等降噪用）
 
-// 筛选状态
+// 筛选状态（关系/领域/卷别均为多选集合，默认全选）
 const state = {
   relOn: { source: true, develop: true, debate: true },
-  vol: null,                 // 卷别筛选，null=全部（点击已选卷可取消）
-  field: null,               // 领域筛选，null=全部；''=未归类
+  volOn: {},      // 卷别多选：{卷: true}，缺失视为选中
+  fieldOn: {},    // 领域多选：{领域: true, '': true}（''=未归类）
 };
+VOL_ORDER.forEach(v => { state.volOn[v] = true; });
+for (const f of Object.keys(FIELD_COLOR)) state.fieldOn[f] = true;
+state.fieldOn[''] = true;
 
 // ================= 场景 =================
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -357,7 +360,7 @@ function updateConceptPointVisibility() {
   for (let i = 0; i < pt.nodes.length; i++) {
     const nd = pt.nodes[i];
     const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-    const vis = nodeVisible(nd.vol) && (nodeFieldVisible(nd.f) || (nd.f === '' && !isExt));
+    const vis = nodeVisible(nd.vol) && nodeFieldVisible(nd.f, isExt);
     attr.array[i] = vis ? pt.baseSize[i] : 0;
   }
   attr.needsUpdate = true;
@@ -598,10 +601,11 @@ function init() {
 let focusName = null;
 
 function nodeVisible(vol) {
-  return state.vol === null || vol === state.vol;
+  return !vol || state.volOn[vol] !== false;   // 无卷概念恒显；卷缺失视为选中
 }
-function nodeFieldVisible(f) {
-  return state.field === null || f === state.field;
+function nodeFieldVisible(f, isExt) {
+  if (!f) return isExt ? state.fieldOn[''] !== false : true;   // 跨卷枢纽恒显；ext 归"未归类"行
+  return state.fieldOn[f] !== false;
 }
 
 function updateVisibility() {
@@ -609,7 +613,7 @@ function updateVisibility() {
   updateConceptPointVisibility();
   // 篇目（网格实体），光晕随主体同步显隐
   workMeshes.forEach(m => {
-    const v = nodeVisible(m.userData.w.vol) && nodeFieldVisible(m.userData.w.f);
+    const v = nodeVisible(m.userData.w.vol) && nodeFieldVisible(m.userData.w.f, false);
     m.visible = v;
     if (m.userData.halo) m.userData.halo.visible = v;
   });
@@ -618,15 +622,17 @@ function updateVisibility() {
     const nd = nodeMap.get(lbl.userData.name);
     if (!nd) return;
     const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-    lbl.visible = nodeVisible(nd.vol) && (nodeFieldVisible(nd.f) || (nd.f === '' && !isExt));
+    lbl.visible = nodeVisible(nd.vol) && nodeFieldVisible(nd.f, isExt);
   });
   // 边 + 粒子
   edges.forEach(ln => {
     const { lk } = ln.userData;
     const relOn = state.relOn[lk.ty];
     const s = nodeMap.get(lk.s), t = nodeMap.get(lk.t);
-    const volOn = nodeVisible(s?.vol) && nodeFieldVisible(s?.f)
-               && nodeVisible(t?.vol) && nodeFieldVisible(t?.f);
+    const sExt = s && ((s.t === 'work' && !workMap.has(s.n)) || s.t === 'ghost');
+    const tExt = t && ((t.t === 'work' && !workMap.has(t.n)) || t.t === 'ghost');
+    const volOn = nodeVisible(s?.vol) && nodeFieldVisible(s?.f, sExt)
+               && nodeVisible(t?.vol) && nodeFieldVisible(t?.f, tExt);
     const isFocus = focusName && (lk.s === focusName || lk.t === focusName);
     ln.visible = relOn && volOn && (lk.bb || isFocus);
     if (ln.visible) {
@@ -817,39 +823,46 @@ document.getElementById('close').addEventListener('click', () => {
   tipLock = false;
 });
 
-// ================= 图例（JS 统一生成：领域 → 卷别 → 关系，均支持点击筛选） =================
+// ================= 图例（JS 统一生成：领域 → 卷别 → 关系，均支持多选/全选） =================
 function buildLegend() {
   const legend = document.getElementById('legend');
   legend.innerHTML = '';
-  const mkH = t => { const d = document.createElement('div'); d.style.marginTop = '9px'; d.style.marginBottom = '6px'; d.className = 'g'; d.textContent = t; return d; };
   const mkIt = cls => { const d = document.createElement('div'); d.className = cls; return d; };
+  // 标题行：文字 + 全选链接
+  const mkHead = (t, onAll) => {
+    const d = document.createElement('div');
+    d.style.cssText = 'margin:9px 0 6px;display:flex;justify-content:space-between;align-items:center';
+    d.innerHTML = `<span class="g" style="margin:0">${t}</span><a class="all" href="javascript:void(0)">全选</a>`;
+    d.querySelector('.all').addEventListener('click', e => { e.preventDefault(); onAll(); });
+    return d;
+  };
 
-  // 1. 领域
-  legend.appendChild(mkH('领域'));
+  // 1. 领域（多选，默认全选）
+  legend.appendChild(mkHead('领域', onFieldAll));
   for (const [f, c] of Object.entries(FIELD_COLOR)) {
     const hex = '#' + new THREE.Color(c).getHexString();
-    const el = mkIt('it fld');
+    const el = mkIt('it fld sel');
     el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f.slice(2)}</span>`;
     el.addEventListener('click', () => onFieldClick(f, el));
     legend.appendChild(el);
   }
-  const un = mkIt('it fld');
+  const un = mkIt('it fld sel');
   un.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">未归类</span>`;
   un.addEventListener('click', () => onFieldClick('', un));
   legend.appendChild(un);
 
-  // 2. 卷别（无"全部卷"，点击已选卷取消筛选）
-  legend.appendChild(mkH('卷别'));
+  // 2. 卷别（多选，默认全选）
+  legend.appendChild(mkHead('卷别', onVolAll));
   for (const vol of VOL_ORDER) {
     const hex = '#' + volumeTone(CONFIG.workColor, vol).getHexString();
-    const el = mkIt('it vol');
+    const el = mkIt('it vol sel');
     el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${vol}</span>`;
     el.addEventListener('click', () => onVolClick(vol, el));
     legend.appendChild(el);
   }
 
-  // 3. 关系（亮度分层示例）
-  legend.appendChild(mkH('关系'));
+  // 3. 关系（多选，亮度分层示例）
+  legend.appendChild(mkHead('关系', onRelAll));
   const REL_SAMPLE = { source: 0.9, develop: 0.55, debate: 0.3 };
   for (const ty of REL_TYPES) {
     const el = mkIt('it sel');
@@ -860,22 +873,40 @@ function buildLegend() {
 }
 
 function onFieldClick(f, el) {
-  state.field = (state.field === f) ? null : f;
-  document.querySelectorAll('#legend .it.fld').forEach(x => x.classList.remove('sel'));
-  if (state.field !== null) el.classList.add('sel');
+  const next = state.fieldOn[f] === false;   // 取消→选中，选中→取消
+  state.fieldOn[f] = next;
+  el.classList.toggle('sel', next);
+  el.classList.toggle('off', !next);
+  updateVisibility();
+}
+function onFieldAll() {
+  for (const f of Object.keys(FIELD_COLOR)) state.fieldOn[f] = true;
+  state.fieldOn[''] = true;
+  document.querySelectorAll('#legend .it.fld').forEach(x => { x.classList.add('sel'); x.classList.remove('off'); });
   updateVisibility();
 }
 
 function onVolClick(vol, el) {
-  state.vol = (state.vol === vol) ? null : vol;
-  document.querySelectorAll('#legend .it.vol').forEach(x => x.classList.remove('sel'));
-  if (state.vol !== null) el.classList.add('sel');
+  const next = state.volOn[vol] === false;
+  state.volOn[vol] = next;
+  el.classList.toggle('sel', next);
+  el.classList.toggle('off', !next);
+  updateVisibility();
+}
+function onVolAll() {
+  VOL_ORDER.forEach(v => { state.volOn[v] = true; });
+  document.querySelectorAll('#legend .it.vol').forEach(x => { x.classList.add('sel'); x.classList.remove('off'); });
   updateVisibility();
 }
 
 function onRelClick(ty, el) {
   state.relOn[ty] = !state.relOn[ty];
   el.classList.toggle('off', !state.relOn[ty]);
+  updateVisibility();
+}
+function onRelAll() {
+  REL_TYPES.forEach(ty => { state.relOn[ty] = true; });
+  document.querySelectorAll('#legend .it').forEach(x => x.classList.remove('off'));
   updateVisibility();
 }
 
