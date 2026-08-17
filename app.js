@@ -84,7 +84,8 @@ const degMap = new Map();    // 概念名 -> 连接度（星等降噪用）
 // 筛选状态
 const state = {
   relOn: { source: true, develop: true, debate: true },
-  vol: null,                 // 卷别筛选，null=全部
+  vol: null,                 // 卷别筛选，null=全部（点击已选卷可取消）
+  field: null,               // 领域筛选，null=全部；''=未归类
 };
 
 // ================= 场景 =================
@@ -356,7 +357,7 @@ function updateConceptPointVisibility() {
   for (let i = 0; i < pt.nodes.length; i++) {
     const nd = pt.nodes[i];
     const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-    const vis = nodeVisible(nd.vol) || (nd.vol == null && !isExt);
+    const vis = nodeVisible(nd.vol) && (nodeFieldVisible(nd.f) || (nd.f === '' && !isExt));
     attr.array[i] = vis ? pt.baseSize[i] : 0;
   }
   attr.needsUpdate = true;
@@ -565,8 +566,7 @@ function init() {
   DATA.links.forEach(lk => makeArc(lk));
 
   // 卷别图例动态生成
-  buildVolLegend();
-  buildFieldLegend();   // 领域图例（历史决议七大领域）
+  buildLegend();   // 图例：领域 → 卷别 → 关系（统一 JS 生成）
   document.getElementById('stat').textContent =
     `${DATA.nodes.length} 概念 · ${DATA.works.length} 篇目 · ${DATA.links.length} 关系`;
 
@@ -600,28 +600,33 @@ let focusName = null;
 function nodeVisible(vol) {
   return state.vol === null || vol === state.vol;
 }
+function nodeFieldVisible(f) {
+  return state.field === null || f === state.field;
+}
 
 function updateVisibility() {
   // 概念点云：aSize 置 0/恢复（中心恒星与跨卷枢纽恒显）
   updateConceptPointVisibility();
   // 篇目（网格实体），光晕随主体同步显隐
   workMeshes.forEach(m => {
-    const v = nodeVisible(m.userData.w.vol);
+    const v = nodeVisible(m.userData.w.vol) && nodeFieldVisible(m.userData.w.f);
     m.visible = v;
     if (m.userData.halo) m.userData.halo.visible = v;
   });
-  // Top12 锚点标签随卷别筛选联动
+  // Top12 锚点标签随卷/领域筛选联动
   topLabels.forEach(lbl => {
     const nd = nodeMap.get(lbl.userData.name);
     if (!nd) return;
     const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
-    lbl.visible = nodeVisible(nd.vol) || (nd.vol == null && !isExt);
+    lbl.visible = nodeVisible(nd.vol) && (nodeFieldVisible(nd.f) || (nd.f === '' && !isExt));
   });
   // 边 + 粒子
   edges.forEach(ln => {
     const { lk } = ln.userData;
     const relOn = state.relOn[lk.ty];
-    const volOn = nodeVisible(nodeMap.get(lk.s)?.vol) && nodeVisible(nodeMap.get(lk.t)?.vol);
+    const s = nodeMap.get(lk.s), t = nodeMap.get(lk.t);
+    const volOn = nodeVisible(s?.vol) && nodeFieldVisible(s?.f)
+               && nodeVisible(t?.vol) && nodeFieldVisible(t?.f);
     const isFocus = focusName && (lk.s === focusName || lk.t === focusName);
     ln.visible = relOn && volOn && (lk.bb || isFocus);
     if (ln.visible) {
@@ -812,69 +817,67 @@ document.getElementById('close').addEventListener('click', () => {
   tipLock = false;
 });
 
-// ================= 卷别图例（动态） =================
-function buildVolLegend() {
+// ================= 图例（JS 统一生成：领域 → 卷别 → 关系，均支持点击筛选） =================
+function buildLegend() {
   const legend = document.getElementById('legend');
-  const volDiv = document.createElement('div');
-  volDiv.style.marginTop = '9px';
-  volDiv.style.marginBottom = '6px';
-  volDiv.className = 'g';
-  volDiv.textContent = '卷别（点击筛选）';
-  legend.appendChild(volDiv);
-  const all = document.createElement('div');
-  all.className = 'it vol sel';
-  all.dataset.vol = '';
-  all.innerHTML = `<span class="dot" style="background:#fff;color:#fff"></span><span class="lbl">全部卷</span>`;
-  all.addEventListener('click', () => onVolClick('', all));
-  legend.appendChild(all);
+  legend.innerHTML = '';
+  const mkH = t => { const d = document.createElement('div'); d.style.marginTop = '9px'; d.style.marginBottom = '6px'; d.className = 'g'; d.textContent = t; return d; };
+  const mkIt = cls => { const d = document.createElement('div'); d.className = cls; return d; };
+
+  // 1. 领域
+  legend.appendChild(mkH('领域'));
+  for (const [f, c] of Object.entries(FIELD_COLOR)) {
+    const hex = '#' + new THREE.Color(c).getHexString();
+    const el = mkIt('it fld');
+    el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f.slice(2)}</span>`;
+    el.addEventListener('click', () => onFieldClick(f, el));
+    legend.appendChild(el);
+  }
+  const un = mkIt('it fld');
+  un.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">未归类</span>`;
+  un.addEventListener('click', () => onFieldClick('', un));
+  legend.appendChild(un);
+
+  // 2. 卷别（无"全部卷"，点击已选卷取消筛选）
+  legend.appendChild(mkH('卷别'));
   for (const vol of VOL_ORDER) {
-    const el = document.createElement('div');
-    el.className = 'it vol';
-    el.dataset.vol = vol;
     const hex = '#' + volumeTone(CONFIG.workColor, vol).getHexString();
+    const el = mkIt('it vol');
     el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${vol}</span>`;
     el.addEventListener('click', () => onVolClick(vol, el));
     legend.appendChild(el);
   }
+
+  // 3. 关系（亮度分层示例）
+  legend.appendChild(mkH('关系'));
+  const REL_SAMPLE = { source: 0.9, develop: 0.55, debate: 0.3 };
+  for (const ty of REL_TYPES) {
+    const el = mkIt('it sel');
+    el.innerHTML = `<span class="line" style="background:#e9edf5;opacity:${REL_SAMPLE[ty]};color:#e9edf5"></span><span class="lbl">${REL_NAME[ty]}</span>`;
+    el.addEventListener('click', () => onRelClick(ty, el));
+    legend.appendChild(el);
+  }
 }
 
-function onVolClick(vol, el) {
-  state.vol = vol || null;
-  document.querySelectorAll('#legend .it.vol').forEach(x => x.classList.remove('sel'));
-  if (el) el.classList.add('sel');
+function onFieldClick(f, el) {
+  state.field = (state.field === f) ? null : f;
+  document.querySelectorAll('#legend .it.fld').forEach(x => x.classList.remove('sel'));
+  if (state.field !== null) el.classList.add('sel');
   updateVisibility();
 }
 
-// 领域图例（历史决议七大领域）
-function buildFieldLegend() {
-  const legend = document.getElementById('legend');
-  const div = document.createElement('div');
-  div.style.marginTop = '9px'; div.style.marginBottom = '6px';
-  div.className = 'g';
-  div.textContent = '领域（历史决议·七大领域）';
-  legend.appendChild(div);
-  for (const [f, c] of Object.entries(FIELD_COLOR)) {
-    const hex = '#' + new THREE.Color(c).getHexString();
-    const el = document.createElement('div');
-    el.className = 'it';
-    el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f.slice(2)}</span>`;
-    legend.appendChild(el);
-  }
-  const g = document.createElement('div');
-  g.className = 'it';
-  g.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">未归类</span>`;
-  legend.appendChild(g);
+function onVolClick(vol, el) {
+  state.vol = (state.vol === vol) ? null : vol;
+  document.querySelectorAll('#legend .it.vol').forEach(x => x.classList.remove('sel'));
+  if (state.vol !== null) el.classList.add('sel');
+  updateVisibility();
 }
 
-// ================= 关系类型图例 =================
-document.querySelectorAll('#legend .it[data-ty]').forEach(el => {
-  el.addEventListener('click', () => {
-    const ty = el.dataset.ty;
-    state.relOn[ty] = !state.relOn[ty];
-    el.classList.toggle('off', !state.relOn[ty]);
-    updateVisibility();
-  });
-});
+function onRelClick(ty, el) {
+  state.relOn[ty] = !state.relOn[ty];
+  el.classList.toggle('off', !state.relOn[ty]);
+  updateVisibility();
+}
 
 // ================= 搜索 + 飞行 =================
 const flight = { active: false, from: new THREE.Vector3(), to: new THREE.Vector3(),
