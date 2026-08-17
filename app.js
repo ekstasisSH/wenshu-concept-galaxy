@@ -14,7 +14,8 @@ const CONFIG = {
   bgColor:      0x05070f,     // 深空背景色（蓝黑微紫）
   autoRotate:   true,
   autoSpeed:    0.8,
-  bloom:        { strength: 0.65, radius: 0.7, threshold: 0.80 },
+  bloom:        { strength: 0.5, radius: 0.7, threshold: 0.80 },
+  pointBright:  1.9,          // 点精灵亮度增益（加色混合下）
   starCount:    3200,
   conceptBase:  1.1,          // 概念最小半径
   conceptMax:   5.5,
@@ -34,7 +35,7 @@ const CONFIG = {
   arcFadeMin:   0.10,         // 弧线端点最低亮度保留
   flowPerLink:  12,           // 每条边粒子数
   flowSpeed:    0.055,
-  flowSize:     1.7,
+  flowSize:     1.3,
   parallelGap:  8.0,          // 平行边偏移间距
   alpha:        0.45,         // 概念混合布局权重（与数据生成一致）
 };
@@ -95,43 +96,51 @@ composer.addPass(new UnrealBloomPass(
   new THREE.Vector2(innerWidth, innerHeight),
   CONFIG.bloom.strength, CONFIG.bloom.radius, CONFIG.bloom.threshold));
 
-// ================= 星空背景（对数螺旋星系 + 外围尘埃） =================
+// ================= 星空背景（退化氛围层：暖核→冷臂，与前景盘面错开） =================
 (function buildStars() {
-  // 螺旋臂粒子：3 臂对数螺旋 + 盘面厚度（中心薄外缘厚）
-  const ARM = 3, N = 3600;
-  const pos = new Float32Array(N * 3);
+  const warm = new THREE.Color(0xc8b394), cool = new THREE.Color(0x5a6c9a);
+  // 螺旋臂粒子：3 臂对数螺旋 + 盘面厚度（密度减半，亮度压低）
+  const ARM = 3, N = 1900;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
     const t = i / N;
     const arm = i % ARM;
-    const r = 620 + t * 1650;                       // 半径随 t 增大
+    const r = 620 + t * 1650;
     const theta = arm * (2 * Math.PI / ARM) + t * 4.2 + (Math.random() - 0.5) * 0.55;
-    const spread = 90 + t * 300;                    // 臂外扩散随半径增大
+    const spread = 90 + t * 300;
     const rr = r + (Math.random() - 0.5) * spread;
-    const x = rr * Math.cos(theta);
-    const z = rr * Math.sin(theta);
-    const y = (Math.random() - 0.5) * (46 + t * 210);  // 盘厚
-    pos[i*3] = x; pos[i*3+1] = y; pos[i*3+2] = z;
+    pos[i*3] = rr * Math.cos(theta);
+    pos[i*3+1] = (Math.random() - 0.5) * (46 + t * 210);
+    pos[i*3+2] = rr * Math.sin(theta);
+    const c = warm.clone().lerp(cool, Math.min(1, t * 1.15));  // 暖核→冷臂
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({
-    color: 0x7a8fc0, size: 1.4, sizeAttenuation: true, transparent: true,
-    opacity: 0.5, fog: false })));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const armPts = new THREE.Points(g, new THREE.PointsMaterial({
+    vertexColors: true, size: 1.3, sizeAttenuation: true, transparent: true,
+    opacity: 0.32, fog: false }));
+  armPts.rotation.x = 0.32; armPts.rotation.z = 0.12;   // 与前景盘面错开，避免穿帮
+  scene.add(armPts);
 
-  // 外围尘埃球壳（稀疏远景）
-  const M = 1400, p2 = new Float32Array(M * 3);
+  // 外围尘埃球壳（稀疏远景，减量降亮）
+  const M = 750, p2 = new Float32Array(M * 3), c2 = new Float32Array(M * 3);
   for (let i = 0; i < M; i++) {
     const r = 1800 + Math.random() * 2200;
     const t2 = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
     p2[i*3] = r * Math.sin(ph) * Math.cos(t2);
     p2[i*3+1] = r * Math.sin(ph) * Math.sin(t2);
     p2[i*3+2] = r * Math.cos(ph);
+    const c = Math.random() < 0.18 ? warm : cool;   // 少量暖点打破单色
+    c2[i*3] = c.r; c2[i*3+1] = c.g; c2[i*3+2] = c.b;
   }
   const g2 = new THREE.BufferGeometry();
   g2.setAttribute('position', new THREE.BufferAttribute(p2, 3));
+  g2.setAttribute('color', new THREE.BufferAttribute(c2, 3));
   scene.add(new THREE.Points(g2, new THREE.PointsMaterial({
-    color: 0x556a9a, size: 1.1, sizeAttenuation: true, transparent: true,
-    opacity: 0.35, fog: false })));
+    vertexColors: true, size: 1.0, sizeAttenuation: true, transparent: true,
+    opacity: 0.22, fog: false })));
 })();
 
 scene.add(new THREE.AmbientLight(0x9fb0d8, 1.2));
@@ -197,53 +206,162 @@ function makeLabelTexture(text, color = '#fff') {
   return new THREE.CanvasTexture(c);
 }
 
-function makeConceptMesh(nd) {
-  const isMao = nd.n === MAO_NAME;
-  const isRef = nd.t === 'work' && !workMap.has(nd.n);  // 被引外部文献
-  const isExt = isRef || nd.t === 'ghost';              // 外部节点（被引+无端点，合并处理）
-  const isLeaf = !isMao && !isExt && (degMap.get(nd.n) || 0) <= CONFIG.leafDegree; // 星等降噪
-  let color = TYPE_COLOR[nd.t] || 0x8899bb;
-  let scale = nd.s;
-  if (isMao) { color = 0xffd24d; scale = nd.s * 1.8; }        // 中心恒星：金色+放大
-  else if (isExt) { color = REF_COLOR; scale = nd.s * 0.8; }  // 外部节点：灰蓝+缩小
-  else if (isLeaf) { scale = nd.s * CONFIG.leafSizeFactor; }  // 叶子概念：缩小
+// ---------- 概念节点：视觉=点精灵云（星云质感），交互=隐形代理球（拾取/面板/飞行零改动） ----------
+const pt = { nodes: [], baseSize: null, baseColor: null, idxByName: new Map(), hoverCur: -1, hoverPrev: -1 };
+let conceptPoints = null;
+let pickProxyMat = null;
+
+function conceptNodeColor(nd, isExt, isLeaf) {
+  if (isExt) return new THREE.Color(REF_COLOR).multiplyScalar(0.7);
+  const vc = nd.vol && DATA.vols[nd.vol];
+  const c = vc ? new THREE.Color(vc) : new THREE.Color(0xe8d9b0); // 跨卷枢纽：暖金白
+  c.lerp(new THREE.Color(0xffffff), 0.25);                        // 降饱和提亮（星尘感）
+  if (nd.t === 'theory') c.multiplyScalar(1.15);                  // 类型靠明度分层，不加色相
+  else if (nd.t === 'scholar') c.multiplyScalar(0.9);
+  if (isLeaf) c.multiplyScalar(CONFIG.leafOpacity * 0.9);         // 叶子降噪=降亮（加色混合）
+  return c;
+}
+
+// 隐形拾取代理（不进渲染流：visible=false；raycast 不检查 visible，仍可命中）
+function makePickProxy(nd) {
+  const isRef = nd.t === 'work' && !workMap.has(nd.n);
+  const isExt = isRef || nd.t === 'ghost';
+  const pickR = Math.max(nd.s * 1.2, 2.4);
+  pickProxyMat = pickProxyMat || new THREE.MeshBasicMaterial();
+  const m = new THREE.Mesh(sphereGeo, pickProxyMat);
+  m.position.set(...nd.p);
+  m.scale.setScalar(pickR);
+  m.visible = false;
+  m.userData = { kind: 'concept', nd, isMao: false, isRef, isExt, baseScale: pickR, ptIndex: pt.idxByName.get(nd.n) };
+  conceptMeshes.push(m);
+  meshByName.set(nd.n, m);
+  scene.add(m);
+}
+
+function buildConceptPoints() {
+  const list = DATA.nodes.filter(nd => nd.n !== MAO_NAME);
+  const n = list.length;
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3),
+        siz = new Float32Array(n), seed = new Float32Array(n);
+  pt.baseSize = new Float32Array(n);
+  list.forEach((nd, i) => {
+    const isRef = nd.t === 'work' && !workMap.has(nd.n);
+    const isExt = isRef || nd.t === 'ghost';
+    const isLeaf = !isExt && (degMap.get(nd.n) || 0) <= CONFIG.leafDegree;
+    pos[i*3] = nd.p[0]; pos[i*3+1] = nd.p[1]; pos[i*3+2] = nd.p[2];
+    const c = conceptNodeColor(nd, isExt, isLeaf);
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+    let d = nd.s * 2;                                   // 世界直径
+    if (isExt) d *= 0.8; else if (isLeaf) d *= CONFIG.leafSizeFactor;
+    pt.baseSize[i] = d; siz[i] = d;
+    seed[i] = (i * 0.6180339887) % 1;
+    pt.nodes.push(nd);
+    pt.idxByName.set(nd.n, i);
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
+  g.setAttribute('aSize', new THREE.BufferAttribute(siz, 1));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uScale: { value: 800 }, uBright: { value: CONFIG.pointBright } },
+    vertexShader: /* glsl */`
+      attribute vec3 aColor; attribute float aSize; attribute float aSeed;
+      uniform float uTime; uniform float uScale;
+      varying vec3 vColor; varying float vTw;
+      void main() {
+        if (aSize < 0.001) { gl_Position = vec4(2.0,2.0,2.0,1.0); gl_PointSize = 0.0; return; }
+        vColor = aColor;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = clamp(aSize * uScale / -mv.z, 1.2, 72.0);
+        vTw = 0.78 + 0.22 * sin(uTime * 0.7 + aSeed * 6.2831853);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform float uBright;
+      varying vec3 vColor; varying float vTw;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.06, d);
+        if (a < 0.02) discard;
+        gl_FragColor = vec4(vColor * uBright, a * vTw);
+      }`,
+  });
+  conceptPoints = new THREE.Points(g, mat);
+  conceptPoints.frustumCulled = false;
+  scene.add(conceptPoints);
+  updatePointScale();
+}
+
+function updatePointScale() {
+  if (!conceptPoints) return;
+  // 世界尺寸→像素：height/2 / tan(fov/2)（含 pixelRatio）
+  conceptPoints.material.uniforms.uScale.value =
+    renderer.domElement.height * 0.5 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+}
+
+// 卷别筛选 → 点云显隐（aSize 置 0 即隐藏且不可拾取前置由代理 visible 逻辑配合）
+function updateConceptPointVisibility() {
+  if (!conceptPoints) return;
+  const attr = conceptPoints.geometry.attributes.aSize;
+  for (let i = 0; i < pt.nodes.length; i++) {
+    const nd = pt.nodes[i];
+    const isExt = (nd.t === 'work' && !workMap.has(nd.n)) || nd.t === 'ghost';
+    const vis = nodeVisible(nd.vol) || (nd.vol == null && !isExt);
+    attr.array[i] = vis ? pt.baseSize[i] : 0;
+  }
+  attr.needsUpdate = true;
+}
+
+// hover 点精灵平滑放大（与代理球 enlarged 动画并行）
+function ptHoverTick() {
+  if (!conceptPoints) return;
+  const attr = conceptPoints.geometry.attributes.aSize;
+  let dirty = false;
+  if (pt.hoverPrev >= 0 && pt.hoverPrev !== pt.hoverCur) {
+    const i = pt.hoverPrev, t = pt.baseSize[i];
+    const nv = attr.array[i] + (t - attr.array[i]) * 0.2;
+    attr.array[i] = nv; dirty = true;
+    if (Math.abs(nv - t) < 0.05) { attr.array[i] = t; pt.hoverPrev = -1; }
+  }
+  if (pt.hoverCur >= 0) {
+    const i = pt.hoverCur, t = pt.baseSize[i] * 1.6;
+    if (attr.array[i] > 0) { attr.array[i] += (t - attr.array[i]) * 0.2; dirty = true; }
+  }
+  if (dirty) attr.needsUpdate = true;
+}
+
+function makeCenterStar(nd) {   // 中心恒星：唯一实体概念球（金色+光晕+常显标签）
+  const color = 0xffd24d;
+  const scale = nd.s * 1.8;
   const mat = new THREE.MeshPhongMaterial({
-    color, transparent: isExt || isLeaf,
-    opacity: isExt ? 0.9 : (isLeaf ? CONFIG.leafOpacity : 1),
-    emissive: new THREE.Color(color).multiplyScalar(isMao ? 0.75 : 0.45),
-    emissiveIntensity: isMao ? 0.5 : (isLeaf ? 0.2 : 0.28), shininess: isMao ? 110 : 60 });
+    color, emissive: new THREE.Color(color).multiplyScalar(0.75),
+    emissiveIntensity: 0.5, shininess: 110 });
   const m = new THREE.Mesh(sphereGeo, mat);
   m.position.set(...nd.p);
   m.scale.setScalar(scale);
-  m.userData = { kind: 'concept', nd, isMao, isRef, isExt, baseScale: scale };
+  m.userData = { kind: 'concept', nd, isMao: true, isRef: false, isExt: false, baseScale: scale };
   conceptMeshes.push(m);
   meshByName.set(nd.n, m);
   scene.add(m);
 
-  // 非叶子概念：叠加染色光晕贴片（叶子/外部节点不加，避免回糊）
-  if (!isMao && !isExt && !isLeaf) {
-    addHalo(m, color, scale * CONFIG.haloSizeFactor, CONFIG.haloOpacity);
-  }
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeHaloTexture(), blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false, opacity: 0.85 }));
+  halo.position.copy(m.position);
+  halo.scale.setScalar(scale * 4.8);
+  halo.renderOrder = 2;
+  scene.add(halo);
+  m.userData.halo = halo;
 
-  // 毛泽东：光晕 + 常显标签
-  if (isMao) {
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: makeHaloTexture(), blending: THREE.AdditiveBlending,
-      transparent: true, depthWrite: false, opacity: 0.85 }));
-    halo.position.copy(m.position);
-    halo.scale.setScalar(scale * 4.8);
-    halo.renderOrder = 2;
-    scene.add(halo);
-    m.userData.halo = halo;
-
-    const lbl = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: makeLabelTexture('毛泽东', '#ffe9a8'), transparent: true, depthWrite: false }));
-    lbl.position.set(m.position.x, m.position.y + scale * 3.2, m.position.z);
-    lbl.scale.set(42, 13, 1);
-    lbl.renderOrder = 3;
-    scene.add(lbl);
-    m.userData.label = lbl;
-  }
+  const lbl = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeLabelTexture('毛泽东', '#ffe9a8'), transparent: true, depthWrite: false }));
+  lbl.position.set(m.position.x, m.position.y + scale * 3.2, m.position.z);
+  lbl.scale.set(42, 13, 1);
+  lbl.renderOrder = 3;
+  scene.add(lbl);
+  m.userData.label = lbl;
 }
 
 function makeWorkMesh(w) {
@@ -347,7 +465,7 @@ for (const ty of REL_TYPES) {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const mat = new THREE.PointsMaterial({
-    size: CONFIG.flowSize, vertexColors: true, transparent: true, opacity: 0.85,
+    size: CONFIG.flowSize, vertexColors: true, transparent: true, opacity: 0.6,
     sizeAttenuation: true, depthWrite: false, blending: THREE.AdditiveBlending });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
@@ -366,7 +484,7 @@ function flowTick(t) {
       pos[i*3]   = v2*f.a.x + 2*uu*f.c.x + u2*f.b.x;
       pos[i*3+1] = v2*f.a.y + 2*uu*f.c.y + u2*f.b.y;
       pos[i*3+2] = v2*f.a.z + 2*uu*f.c.z + u2*f.b.z;
-      const bright = Math.pow(u, 3) * 1.7 + 0.15;
+      const bright = Math.pow(u, 3) * 1.05 + 0.08;   // 降亮，避免喧宾夺主
       col[i*3] = f.cr*bright; col[i*3+1] = f.cg*bright; col[i*3+2] = f.cb*bright;
     }
     pts.geometry.attributes.position.needsUpdate = true;
@@ -388,7 +506,11 @@ function init() {
     degMap.set(lk.t, (degMap.get(lk.t) || 0) + 1);
   });
   DATA.works.forEach(w => { workMap.set(w.n, w); makeWorkMesh(w); });
-  DATA.nodes.forEach(nd => { nodeMap.set(nd.n, nd); makeConceptMesh(nd); });
+  DATA.nodes.forEach(nd => { nodeMap.set(nd.n, nd); });
+  buildConceptPoints();          // 点精灵云（视觉层）
+  DATA.nodes.forEach(nd => {     // 代理球（交互层）+ 中心恒星实体
+    if (nd.n === MAO_NAME) makeCenterStar(nd); else makePickProxy(nd);
+  });
   DATA.links.forEach(lk => makeArc(lk));
 
   // 卷别图例动态生成
@@ -418,13 +540,9 @@ function nodeVisible(vol) {
 }
 
 function updateVisibility() {
-  // 节点/篇目（中心恒星与跨卷枢纽恒显），光晕随主体同步显隐
-  conceptMeshes.forEach(m => {
-    const nd = m.userData.nd;
-    const v = m.userData.isMao || nodeVisible(nd.vol) || (nd.vol == null && !m.userData.isExt);
-    m.visible = v;
-    if (m.userData.halo) m.userData.halo.visible = v;
-  });
+  // 概念点云：aSize 置 0/恢复（中心恒星与跨卷枢纽恒显）
+  updateConceptPointVisibility();
+  // 篇目（网格实体），光晕随主体同步显隐
   workMeshes.forEach(m => {
     const v = nodeVisible(m.userData.w.vol);
     m.visible = v;
@@ -482,6 +600,8 @@ renderer.domElement.addEventListener('pointermove', () => {
     if (obj) {
       hovered = obj;
       enlarged.add(obj);              // 平滑放大（animate 中 lerp，不再瞬时跳变）
+      pt.hoverPrev = pt.hoverCur;     // 点精灵 hover 放大目标
+      pt.hoverCur = obj.userData.ptIndex ?? -1;
       const { kind } = obj.userData;
       if (kind === 'work') obj.material.opacity = 1;
       setFocus(kind === 'work' ? obj.userData.w.n : obj.userData.nd.n);
@@ -514,6 +634,8 @@ function resetHover() {
   if (!hovered) return;
   // 缩放交由 animate 中的 lerp 平滑回落，此处只恢复透明度
   if (hovered.userData.kind === 'work') hovered.material.opacity = CONFIG.workOpacity;
+  pt.hoverPrev = pt.hoverCur;
+  pt.hoverCur = -1;
   hovered = null;
   tipEl.style.display = 'none';
 }
@@ -526,7 +648,8 @@ function showTip(obj) {
     tipEl.innerHTML = `<b style="color:${col}">${w.n}</b><br><span style="color:#9fb0d8">篇目 · ${w.vol} · ${w.cnt} 概念 · 点击查看</span>`;
   } else {
     const nd = obj.userData.nd;
-    const col = '#' + new THREE.Color(TYPE_COLOR[nd.t] || 0x8899bb).getHexString();
+    const vc = (nd.vol && DATA.vols[nd.vol]) ? DATA.vols[nd.vol] : 0xe8d9b0;  // 概念色=卷色
+    const col = '#' + new THREE.Color(vc).getHexString();
     if (obj.userData.isExt) {
       tipEl.innerHTML = `<b style="color:#aab6d6">${nd.n}</b><br><span style="color:#9fb0d8">外部节点${nd.src ? ` · 见「${nd.src}」` : ''} · 点击查看</span>`;
     } else if (obj.userData.isMao) {
@@ -755,6 +878,8 @@ function animate() {
     }
   });
 
+  if (conceptPoints) conceptPoints.material.uniforms.uTime.value = elapsed;
+  ptHoverTick();
   flowTick(elapsed);
   composer.render();
 }
@@ -764,6 +889,7 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
+  updatePointScale();
 });
 
 // 启动
