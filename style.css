@@ -81,6 +81,26 @@ html, body {
   transition: opacity .15s, color .15s;
 }
 #legend .all:hover { opacity: 1; color: var(--gold); }
+/* 折叠手柄：桌面隐藏（图例常驻），移动端显示 */
+.lg-hd { display: none; }
+
+/* ---------- 移动端：图例可折叠胶囊 + 详情面板底部抽屉 ---------- */
+@media (max-width: 720px) {
+  #legend { left: 8px; width: 118px; padding: 8px; font-size: 11.5px; }
+  .lg-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--gold-soft); font-size: 11px; letter-spacing: .18em;
+    cursor: pointer; padding: 2px 6px 4px; user-select: none;
+  }
+  #legend.folded { width: 46px; }
+  #legend.folded > *:not(.lg-hd) { display: none; }
+  #legend.folded .lg-hd { justify-content: center; }
+  #panel {
+    left: 8px; right: 8px; top: auto; bottom: 8px;
+    width: auto; max-height: 62vh; transform: none;
+    border-radius: 14px; animation: none;
+  }
+}
 .it {
   display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
   padding: 1px 6px; border-radius: 7px; transition: background .15s, opacity .15s;

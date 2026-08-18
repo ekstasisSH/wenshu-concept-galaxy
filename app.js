@@ -1032,6 +1032,15 @@ function buildLegend() {
     return d;
   };
 
+  // 折叠手柄：移动端收起图例（桌面隐藏），箭头随状态翻转
+  const hd = mkIt('lg-hd');
+  hd.innerHTML = '<span>图例</span><span class="ar">▾</span>';
+  hd.addEventListener('click', () => {
+    legend.classList.toggle('folded');
+    hd.querySelector('.ar').textContent = legend.classList.contains('folded') ? '▸' : '▾';
+  });
+  legend.appendChild(hd);
+
   // 1. 领域（7 领域 + 跨领域枢纽 + 外部文献，多选，默认全选）
   legend.appendChild(mkHead('领域', onFieldAll));
   for (const [f, c] of Object.entries(FIELD_COLOR)) {
@@ -1065,6 +1074,8 @@ function buildLegend() {
     el.addEventListener('click', () => onRelClick(ty, el));
     legend.appendChild(el);
   }
+  // 移动端默认折叠（打开即清爽）
+  if (matchMedia('(max-width: 720px)').matches) legend.classList.add('folded');
 }
 
 function onFieldClick(f, el) {
