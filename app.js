@@ -1034,7 +1034,7 @@ function buildLegend() {
 
   // 折叠手柄：移动端收起图例（桌面隐藏），箭头随状态翻转
   const hd = mkIt('lg-hd');
-  hd.innerHTML = '<span>图例</span><span class="ar">▾</span>';
+  hd.innerHTML = '<span>筛选</span><span class="ar">▾</span>';
   hd.addEventListener('click', () => {
     legend.classList.toggle('folded');
     hd.querySelector('.ar').textContent = legend.classList.contains('folded') ? '▸' : '▾';
