@@ -94,13 +94,26 @@ const tourD = await page.evaluate(() => {
   }
   dbg.tourStart();
   const startOk = t.active;
-  const stepsOk = t.steps.length === 5 && t.steps.map(s => s.kind).join(',') === 'hold,fly,arc,arc,overview';
+  const kinds = t.steps.map(s => s.kind).join(',');
+  const stepsOk = t.steps.length === 20
+    && t.steps.slice(0, 5).map(s => s.kind).join(',') === 'hold,fly,arc,arc,overview'
+    && t.steps.slice(5).every(s => s.kind === 'filter')
+    && t.steps.filter(s => s.kind === 'filter').length === 15;
+  // filter 应用断言：reset=min 最小集 / 增量开 / reset=all 全开
+  dbg.tourApplyFilter({ reset: 'min' });
+  const minOk = dbg.state.fieldOn['cross'] === true && dbg.state.fieldOn[''] === true
+    && dbg.state.fieldOn['一.新民主主义革命'] === false && dbg.state.volOn['第一卷'] === true
+    && dbg.state.volOn['第二卷'] === false && dbg.state.relOn['source'] === false;
+  dbg.tourApplyFilter({ fieldOn: ['一.新民主主义革命'], relOn: ['source'] });
+  const incOk = dbg.state.fieldOn['一.新民主主义革命'] === true && dbg.state.relOn['source'] === true;
+  dbg.tourApplyFilter({ reset: 'all' });
+  const allOk = dbg.state.fieldOn['七.活的灵魂'] === true && dbg.state.volOn['第四卷'] === true && dbg.state.relOn['debate'] === true;
   dbg.tourCancel();
   const cancelOk = !t.active;
-  return { stepsOk, nodesOk: !!(sjl && jtz), arcOk, arcPos, startOk, cancelOk };
+  return { stepsOk, nodesOk: !!(sjl && jtz), arcOk, arcPos, startOk, cancelOk, filterOk: minOk && incOk && allOk };
 });
-console.log(`tour 断言: 步骤=${tourD.stepsOk ? '✓' : '✗'} 节点=${tourD.nodesOk ? '✓' : '✗'} 连线取景=${tourD.arcOk ? '✓' : '✗ ' + JSON.stringify(tourD.arcPos)} 启动=${tourD.startOk ? '✓' : '✗'} 打断=${tourD.cancelOk ? '✓' : '✗'}`);
-const tourOk = !tourD.missing && tourD.stepsOk && tourD.nodesOk && tourD.arcOk && tourD.startOk && tourD.cancelOk;
+console.log(`tour 断言: 步骤=${tourD.stepsOk ? '✓' : '✗'} 节点=${tourD.nodesOk ? '✓' : '✗'} 连线取景=${tourD.arcOk ? '✓' : '✗ ' + JSON.stringify(tourD.arcPos)} 启动=${tourD.startOk ? '✓' : '✗'} 筛选=${tourD.filterOk ? '✓' : '✗'} 打断=${tourD.cancelOk ? '✓' : '✗'}`);
+const tourOk = !tourD.missing && tourD.stepsOk && tourD.nodesOk && tourD.arcOk && tourD.startOk && tourD.cancelOk && tourD.filterOk;
 
 // ?tour=1 自动启动
 const p2 = await browser.newPage();
@@ -111,12 +124,37 @@ const tourAuto = await p2.evaluate(() => window.__dbg ? window.__dbg.tour.active
 await p2.close();
 console.log(`?tour=1 自动启动: ${tourAuto ? '✓' : '✗'}`);
 
+// [LOD] 局部标签断言：特写时显示标签，整体时隐藏
+const lodD = await page.evaluate(() => {
+  const dbg = window.__dbg;
+  if (!dbg || !dbg.lodLabels) return { missing: true };
+  const pool = dbg.lodLabels.length;
+  const sjl = dbg.workMeshes.find(w => w.userData.w.n === '实践论');
+  // 特写：相机放实践论附近
+  dbg.camera.position.set(sjl.position.x - 40, sjl.position.y + 60, sjl.position.z + 140);
+  dbg.controls.target.copy(sjl.position);
+  dbg.controls.update();
+  dbg.updateLodLabels();
+  const visNear = dbg.lodLabels.filter(l => l.visible).length;
+  const nearNames = dbg.lodLabels.filter(l => l.visible).map(l => l.userData && l.userData.name).filter(Boolean).length;
+  // 整体：相机回默认
+  dbg.camera.position.set(430, 260, 540);
+  dbg.controls.target.set(0, 0, 0);
+  dbg.controls.update();
+  dbg.updateLodLabels();
+  const visFar = dbg.lodLabels.filter(l => l.visible).length;
+  const top12Visible = dbg.topLabels.filter(l => l.visible).length;
+  return { pool, visNear, visFar, top12Visible };
+});
+console.log(`LOD 断言: 池=${lodD.pool} 特写可见=${lodD.visNear} 整体可见=${lodD.visFar} 整体Top12=${lodD.top12Visible} ${(lodD.pool === 60 && lodD.visNear > 0 && lodD.visFar === 0 && lodD.top12Visible === 12) ? '✓' : '✗'}`);
+const lodOk = !lodD.missing && lodD.pool === 60 && lodD.visNear > 0 && lodD.visFar === 0 && lodD.top12Visible === 12;
+
 console.log(`日心断言: 中心r=${d.mao?.r} 四环=${ringOk ? '✓' : '✗ ' + JSON.stringify(d.ringAvg)} 卫星p95=${d.satP95}`);
 console.log(`新增断言: Top12=${topOk ? '✓' : '✗ ' + d.topLabels} 加载屏=${splashOk ? '✓' : '✗ ' + d.splash} 引导=${guideOk ? '✓' : '✗ ' + d.guide}`);
 
-const ok = d.concepts === 1275 && d.works === 137 && d.refCount > 0 && d.mao && d.mao.hasHalo && d.mao.hasLabel && d.mao.color === '#ffd24d' && helioOk && topOk && splashOk && guideOk && hOk && d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30 && tourOk && tourAuto;
+const ok = d.concepts === 1275 && d.works === 137 && d.refCount > 0 && d.mao && d.mao.hasHalo && d.mao.hasLabel && d.mao.color === '#ffd24d' && helioOk && topOk && splashOk && guideOk && hOk && d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30 && tourOk && tourAuto && lodOk;
 console.log(`[F] 恒星亮核: count=${d.starPt?.count} aSize=${d.starPt?.aSize} uBright=${d.starPt?.bright} ${(d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30) ? '✓' : '✗'}`);
-console.log(ok ? '✅ 数值验证全部通过（含日心 + Top12 + 加载屏 + 引导 + H键 + 恒星亮核 + 自动巡礼）' : '❌ 有断言失败');
+console.log(ok ? '✅ 数值验证全部通过（含日心 + Top12 + 加载屏 + 引导 + H键 + 恒星亮核 + 自动巡礼 + LOD局部标签）' : '❌ 有断言失败');
 await page.screenshot({ path: 'shot_m4.png' });
 await browser.close();
 process.exit(ok ? 0 : 1);

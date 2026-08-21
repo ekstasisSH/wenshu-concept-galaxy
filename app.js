@@ -49,6 +49,12 @@ const CONFIG = {
   flowSpeed:    0.055,
   parallelGap:  8.0,          // 平行边偏移间距
   topLabelCount: 12,          // Top N 概念常显锚点标签
+  // [T] 巡礼飞行与局部标签（LOD）
+  flightSpeed:  0.85,         // 飞行速度（0.71s→~1.2s 完成，更从容；巡礼与搜索聚焦共用）
+  lodDist:      460,          // 相机距 target 低于此值 → 启用局部标签（整体≈735 不启用）
+  lodRadius:    2.0,          // 候选节点球半径 = 距离 × 此系数
+  lodPool:      60,           // 局部标签池大小（按连接度取 top N）
+  lodMinDeg:    3,            // 概念最低连接度（≤2 叶子概念不标，防标签海）
   alpha:        0.45,         // 概念混合布局权重（与数据生成一致）
 };
 
@@ -264,6 +270,79 @@ function buildTopLabels() {
     scene.add(lbl);
     topLabels.push(lbl);
   });
+}
+
+// ---------- [LOD] 局部标签池：放大时显示视锥内节点名（篇目 + 高连接概念，连接度排序取 top N） ----------
+const lodLabels = [];
+const labelTexCache = new Map();    // 名字 -> CanvasTexture（复用，避免每帧重绘纹理）
+function getLabelTex(name) {
+  let t = labelTexCache.get(name);
+  if (!t) { t = makeLabelTexture(name, '#e9edf5'); labelTexCache.set(name, t); }
+  return t;
+}
+function ensureLodPool() {
+  while (lodLabels.length < CONFIG.lodPool) {
+    const lbl = new THREE.Sprite(new THREE.SpriteMaterial({ map: null, transparent: true, depthWrite: false }));
+    lbl.visible = false; lbl.renderOrder = 3;
+    scene.add(lbl);
+    lodLabels.push(lbl);
+  }
+}
+let topLabelRestore = null;          // LOD 启用时暂存 Top12 显隐（关时恢复）
+const _lodFrustum = new THREE.Frustum();
+function updateLodLabels() {
+  const dist = camera.position.distanceTo(controls.target);
+  const on = dist < CONFIG.lodDist;
+  if (!on) {
+    for (let i = 0; i < lodLabels.length; i++) lodLabels[i].visible = false;
+    if (topLabelRestore) {           // 恢复 Top12 常显
+      for (let i = 0; i < topLabels.length; i++) topLabels[i].visible = topLabelRestore[i];
+      topLabelRestore = null;
+    }
+    return;
+  }
+  if (!topLabelRestore) {            // 首次启用：暂存并隐藏 Top12（避免重复）
+    topLabelRestore = topLabels.map(l => l.visible);
+    for (let i = 0; i < topLabels.length; i++) topLabels[i].visible = false;
+  }
+  camera.updateMatrixWorld();
+  _lodFrustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const R = dist * CONFIG.lodRadius;
+  const tx = controls.target.x, ty = controls.target.y, tz = controls.target.z;
+  const R2 = R * R;
+  const cand = [];
+  // 篇目星（137）
+  for (let i = 0; i < workMeshes.length; i++) {
+    const m = workMeshes[i], p = m.position;
+    const dx = p.x - tx, dy = p.y - ty, dz = p.z - tz;
+    if (dx * dx + dy * dy + dz * dz <= R2 && _lodFrustum.containsPoint(p)) {
+      cand.push({ p, name: m.userData.w.n, deg: m.userData.w.cnt || 1, sz: 6 });
+    }
+  }
+  // 概念点（连接度 ≥ lodMinDeg，防标签海）
+  for (let i = 0; i < conceptMeshes.length; i++) {
+    const m = conceptMeshes[i], nd = m.userData.nd;
+    if (!nd || nd.n === MAO_NAME) continue;
+    const p = m.position;
+    const dx = p.x - tx, dy = p.y - ty, dz = p.z - tz;
+    if (dx * dx + dy * dy + dz * dz <= R2 && _lodFrustum.containsPoint(p)) {
+      const deg = degMap.get(nd.n) || 0;
+      if (deg < CONFIG.lodMinDeg) continue;
+      cand.push({ p, name: nd.n, deg, sz: Math.max(nd.s || 1, 2) });
+    }
+  }
+  cand.sort((a, b) => b.deg - a.deg);
+  const n = Math.min(CONFIG.lodPool, cand.length);
+  for (let i = 0; i < CONFIG.lodPool; i++) {
+    const l = lodLabels[i];
+    if (i < n) {
+      const c = cand[i];
+      l.material.map = getLabelTex(c.name);
+      l.position.set(c.p.x, c.p.y + c.sz * 2.8, c.p.z);
+      l.scale.set(Math.max(c.name.length * 3.4, 14), 5.4, 1);
+      l.visible = true;
+    } else l.visible = false;
+  }
 }
 
 // ---------- 概念节点：视觉=点精灵云（星云质感），交互=隐形代理球（拾取/面板/飞行零改动） ----------
@@ -775,6 +854,7 @@ function init() {
 
   // 更新边可见性（初始：骨干显示，叶子隐藏）
   buildTopLabels();          // Top12 概念常显锚点
+  ensureLodPool();           // [LOD] 局部标签池（放大时显示节点名）
   updateVisibility();
   animate();
 
@@ -798,7 +878,10 @@ function init() {
     // [PPT 截图] 相机/控件/intro/renderer 句柄（puppeteer 控角度用）
     scene, camera, controls, renderer, intro, composer,
     // [自动巡礼] tour 状态机（断言/自动化用）
-    tour, tourArcPos, tourStart, tourCancel,
+    tour, tourArcPos, tourStart, tourCancel, tourApplyFilter,
+    // [LOD] 局部标签池（断言/自动化用）
+    lodLabels, updateLodLabels, labelTexCache,
+    state,
   };
 }
 
@@ -1054,11 +1137,13 @@ function buildLegend() {
   for (const [f, c] of Object.entries(FIELD_COLOR)) {
     const hex = '#' + new THREE.Color(c).getHexString();
     const el = mkIt('it fld sel');
+    el.dataset.f = f;
     el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${f === 'cross' ? '跨领域枢纽' : f.slice(2)}</span>`;
     el.addEventListener('click', () => onFieldClick(f, el));
     legend.appendChild(el);
   }
   const ext = mkIt('it fld sel');
+  ext.dataset.f = '';
   ext.innerHTML = `<span class="dot" style="background:#9aa7c0;color:#9aa7c0"></span><span class="lbl">外部文献</span>`;
   ext.addEventListener('click', () => onFieldClick('', ext));
   legend.appendChild(ext);
@@ -1068,6 +1153,7 @@ function buildLegend() {
   for (const vol of VOL_ORDER) {
     const hex = '#' + volumeTone(CONFIG.workColor, vol).getHexString();
     const el = mkIt('it vol sel');
+    el.dataset.vol = vol;
     el.innerHTML = `<span class="dot" style="background:${hex};color:${hex}"></span><span class="lbl">${vol}</span>`;
     el.addEventListener('click', () => onVolClick(vol, el));
     legend.appendChild(el);
@@ -1078,6 +1164,7 @@ function buildLegend() {
   const REL_SAMPLE = { source: 0.9, develop: 0.55, debate: 0.3 };
   for (const ty of REL_TYPES) {
     const el = mkIt('it sel');
+    el.dataset.rel = ty;
     el.innerHTML = `<span class="line" style="background:#e9edf5;opacity:${REL_SAMPLE[ty]};color:#e9edf5"></span><span class="lbl">${REL_NAME[ty]}</span>`;
     el.addEventListener('click', () => onRelClick(ty, el));
     legend.appendChild(el);
@@ -1199,8 +1286,42 @@ function tourStep() {
     }
   } else if (s.kind === 'overview') {
     tourOverview();
+  } else if (s.kind === 'filter') {
+    tourApplyFilter(s);       // 筛选演示：改 state + 同步图例 + 刷新可见性（相机不动，保持整体俯瞰）
   }
   // 'hold' 步骤：不动相机，仅停留
+}
+
+// 筛选状态同步到图例 DOM（sel/off class），供 tour filter 步骤与手动点击保持一致
+function syncLegendState() {
+  document.querySelectorAll('#legend .it').forEach(el => {
+    const on = el.dataset.f !== undefined ? state.fieldOn[el.dataset.f]
+            : el.dataset.vol !== undefined ? state.volOn[el.dataset.vol]
+            : el.dataset.rel !== undefined ? state.relOn[el.dataset.rel]
+            : false;
+    el.classList.toggle('sel', !!on);
+    el.classList.toggle('off', !on);
+  });
+}
+// 筛选演示应用：reset=min（跨领域+外部文献+第一卷，关系全关）/ all（全开）；或增量开 {fieldOn/volOn/relOn:[...]}
+function tourApplyFilter(s) {
+  if (s.reset === 'min') {
+    for (const k in state.fieldOn) state.fieldOn[k] = false;
+    state.fieldOn['cross'] = true; state.fieldOn[''] = true;
+    for (const k in state.volOn) state.volOn[k] = false;
+    state.volOn['第一卷'] = true;
+    for (const k in state.relOn) state.relOn[k] = false;
+  } else if (s.reset === 'all') {
+    for (const k in state.fieldOn) state.fieldOn[k] = true;
+    for (const k in state.volOn) state.volOn[k] = true;
+    for (const k in state.relOn) state.relOn[k] = true;
+  } else {
+    if (s.fieldOn) s.fieldOn.forEach(f => { state.fieldOn[f] = true; });
+    if (s.volOn) s.volOn.forEach(v => { state.volOn[v] = true; });
+    if (s.relOn) s.relOn.forEach(r => { state.relOn[r] = true; });
+  }
+  syncLegendState();
+  updateVisibility();
 }
 function tourStart() {
   if (!meshByName.get('实践论') || !meshByName.get('教条主义')) {
@@ -1219,7 +1340,13 @@ function tourStart() {
     { kind: 'fly',     name: '实践论', panel: true, hold: 5 },           // 2 实践论特写
     { kind: 'arc', a: '实践论', b: '教条主义', t: -0.35, hold: 4 },      // 3 沿争论连线（近实践论侧）
     { kind: 'arc', a: '实践论', b: '教条主义', t: 0.35, hold: 4 },       // 4 连线滑动（近教条主义侧）
-    { kind: 'overview', hold: 4 },                                       // 5 回整体
+    { kind: 'overview', hold: 3 },                                       // 5 回整体
+    // ---- 筛选演示：知识库对毛选的拆分与组织（相机保持整体俯瞰）----
+    { kind: 'filter', reset: 'min', hold: 3 },                           // 6 最小集：跨领域+外部文献+第一卷（关系全关）
+    ...Object.keys(FIELD_COLOR).filter(f => f !== 'cross').map(f => ({ kind: 'filter', fieldOn: [f], hold: 1.6 })),  // 7-13 逐个加领域
+    ...['第二卷', '第三卷', '第四卷'].map(v => ({ kind: 'filter', volOn: [v], hold: 1.6 })),                        // 14-16 逐个加卷
+    ...REL_TYPES.map(ty => ({ kind: 'filter', relOn: [ty], hold: 1.6 })),                                           // 17-19 逐个加关系
+    { kind: 'filter', reset: 'all', hold: 5 },                           // 20 全貌定格
   ];
   tour.active = true; tour.cancelled = false; tour.idx = -1;
   updateTourBtn();
@@ -1319,13 +1446,16 @@ function animate() {
   }
 
   if (flight.active) {
-    flight.t += dt * 1.4;
+    flight.t += dt * CONFIG.flightSpeed;
     const k = Math.min(flight.t, 1);
-    const e = 1 - Math.pow(1 - k, 3);
+    const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;   // easeInOutCubic（起止平滑，无急停急走）
     camera.position.lerpVectors(flight.from, flight.to, e);
     controls.target.lerpVectors(flight.lookFrom, flight.lookTo, e);
     if (k >= 1) flight.active = false;
   }
+
+  // [LOD] 局部标签：放大时显示画面内节点名（篇目+高连接概念，视锥剔除+连接度排序）
+  updateLodLabels();
 
   // 自动巡礼 hold 计时（飞行完成 → 停留 → 下一步）
   if (tour.active && !tour.cancelled && !flight.active && !intro.active) {
