@@ -797,7 +797,15 @@ function init() {
     ui: { showConceptPanel, showWorkPanel, nodeMap, workMap },  // UI 截图验证钩子
     // [PPT 截图] 相机/控件/intro/renderer 句柄（puppeteer 控角度用）
     scene, camera, controls, renderer, intro, composer,
+    // [自动巡礼] tour 状态机（断言/自动化用）
+    tour, tourArcPos, tourStart, tourCancel,
   };
+}
+
+// 自动巡礼 URL 触发（?tour=1：录制/演示直接自动启动）
+{
+  const sp = new URLSearchParams(location.search);
+  if (sp.get('tour') === '1') setTimeout(tourStart, 1200);
 }
 
 // ================= 可见性管理（卷别筛选 + 类型开关 + 焦点高亮） =================
@@ -1132,6 +1140,117 @@ function flyTo(name) {
   flight.lookTo.copy(p);
 }
 
+// ================= 自动巡礼（tour）=================
+// 路径：整体 → 实践论 → 沿争论连线弧线（实践论→教条主义，两段滑动）→ 回整体
+// 触发：按钮 bTour / 快捷键 T / URL ?tour=1；打断：任何用户输入（还政不抢回，借鉴 shiyun cancelled 语义）
+const tour = {
+  active: false, cancelled: false,
+  steps: [], idx: -1, holdUntil: 0,
+};
+const tourBtn = document.getElementById('bTour');
+function updateTourBtn() {
+  if (tourBtn) tourBtn.textContent = tour.active ? '巡礼中…' : '自动巡礼';
+}
+// 连线取景位：两端点同时入画（借鉴 shiyun ceremonyFrame 的俯冲弧数学：中点+沿连线偏移+垂向俯冲+距离clamp）
+function tourArcPos(aPos, bPos, t) {
+  const mid = new THREE.Vector3().addVectors(aPos, bPos).multiplyScalar(0.5);
+  const axis = new THREE.Vector3().subVectors(bPos, aPos);
+  const aLen = axis.length() || 1e-6;
+  const axN = axis.clone().normalize();
+  const base = mid.clone().addScaledVector(axN, t * aLen * 0.28);     // 沿连线方向偏移（t∈[-1,1]）
+  const perp = new THREE.Vector3(-axN.z, 0, axN.x).normalize();        // 水平面内垂向
+  if (perp.dot(camera.position.clone().sub(base)) < 0) perp.negate();  // 选相机近侧防绕远
+  const off = new THREE.Vector3(perp.x, perp.y + 0.32, perp.z).normalize(); // 俯冲弧（+Y 抬升）
+  const fit = (aLen / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.3;
+  const dist = Math.max(60, Math.min(800, fit));                       // 距离 clamp
+  return { pos: base.clone().addScaledVector(off, dist), look: base };
+}
+function tourFlyTo(pos, look) {
+  flight.active = true; flight.t = 0;
+  flight.from.copy(camera.position);
+  flight.lookFrom.copy(controls.target);
+  flight.to.copy(pos);
+  flight.lookTo.copy(look);
+}
+function tourOverview() {
+  flight.active = true; flight.t = 0;
+  flight.from.copy(camera.position);
+  flight.lookFrom.copy(controls.target);
+  flight.to.set(CONFIG.camera.x, CONFIG.camera.y, CONFIG.camera.z);
+  flight.lookTo.set(0, 0, 0);
+}
+function tourStep() {
+  const s = tour.steps[tour.idx];
+  if (s.kind === 'fly') {
+    const hit = meshByName.get(s.name);
+    if (hit) {
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      tourFlyTo(hit.position.clone().addScaledVector(dir, hit.scale.x * 18 + 50), hit.position.clone());
+      if (s.panel) {
+        if (hit.userData.kind === 'work') showWorkPanel(hit.userData.w);
+        else if (hit.userData.nd) showConceptPanel(nodeMap.get(hit.userData.nd.n));
+      }
+    }
+  } else if (s.kind === 'arc') {
+    const a = meshByName.get(s.a), b = meshByName.get(s.b);
+    if (a && b) {
+      const f = tourArcPos(a.position, b.position, s.t);
+      tourFlyTo(f.pos, f.look);
+    }
+  } else if (s.kind === 'overview') {
+    tourOverview();
+  }
+  // 'hold' 步骤：不动相机，仅停留
+}
+function tourStart() {
+  if (!meshByName.get('实践论') || !meshByName.get('教条主义')) {
+    tipEl.innerHTML = '<span style="color:#ff9a8a">巡礼所需节点缺失</span>';
+    tipEl.style.display = 'block'; tipEl.style.left = innerWidth / 2 + 'px'; tipEl.style.top = innerHeight / 2 + 'px';
+    setTimeout(() => tipEl.style.display = 'none', 2000);
+    return;
+  }
+  intro.active = false;                    // 跳过开场缓入
+  camera.position.set(CONFIG.camera.x, CONFIG.camera.y, CONFIG.camera.z);  // 直接定位整体视角（intro 中途被关时相机不在终点）
+  controls.target.set(0, 0, 0);
+  controls.update();
+  controls.autoRotate = false; updateRotBtn();
+  tour.steps = [
+    { kind: 'hold',    hold: 3.5 },                                      // 1 整体俯瞰
+    { kind: 'fly',     name: '实践论', panel: true, hold: 5 },           // 2 实践论特写
+    { kind: 'arc', a: '实践论', b: '教条主义', t: -0.35, hold: 4 },      // 3 沿争论连线（近实践论侧）
+    { kind: 'arc', a: '实践论', b: '教条主义', t: 0.35, hold: 4 },       // 4 连线滑动（近教条主义侧）
+    { kind: 'overview', hold: 4 },                                       // 5 回整体
+  ];
+  tour.active = true; tour.cancelled = false; tour.idx = -1;
+  updateTourBtn();
+  tourNext();
+}
+function tourNext() {
+  if (!tour.active || tour.cancelled) return;
+  tour.idx++;
+  if (tour.idx >= tour.steps.length) { tourStop(); return; }
+  tourStep();
+  tour.holdUntil = performance.now() + tour.steps[tour.idx].hold * 1000;
+}
+function tourStop() {
+  tour.active = false; tour.cancelled = false;
+  updateTourBtn();
+}
+function tourCancel() {
+  if (!tour.active) return;
+  tour.active = false; tour.cancelled = true;
+  updateTourBtn();
+}
+if (tourBtn) tourBtn.addEventListener('click', () => { tour.active ? tourCancel() : tourStart(); });
+document.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    tour.active ? tourCancel() : tourStart();
+  }
+});
+// 打断：任何用户交互 → 还政不抢回（借鉴 shiyun FlyControls cancelled）
+renderer.domElement.addEventListener('pointerdown', tourCancel);
+renderer.domElement.addEventListener('wheel', tourCancel, { passive: true });
+
 document.getElementById('s').addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const q = e.target.value.trim();
@@ -1206,6 +1325,11 @@ function animate() {
     camera.position.lerpVectors(flight.from, flight.to, e);
     controls.target.lerpVectors(flight.lookFrom, flight.lookTo, e);
     if (k >= 1) flight.active = false;
+  }
+
+  // 自动巡礼 hold 计时（飞行完成 → 停留 → 下一步）
+  if (tour.active && !tour.cancelled && !flight.active && !intro.active) {
+    if (performance.now() >= tour.holdUntil) tourNext();
   }
 
   controls.update();

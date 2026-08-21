@@ -8,6 +8,7 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.24.2",
+    "puppeteer-core": "^25.8.0"
   }
 }

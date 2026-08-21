@@ -7,7 +7,7 @@ const errs = [];
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
 page.on('pageerror', e => errs.push(e.message));
 await page.setViewport({ width: 1440, height: 900 });
-await page.goto('file:///E:/双创知识库/07_参考文件/_v2_work/skill_rag_full/galaxy/dist/concept_galaxy.html', { waitUntil: 'load' });
+await page.goto('file:///E:/双创知识库/wenshu-concept-galaxy/dist/concept_galaxy.html', { waitUntil: 'load' });
 await new Promise(r => setTimeout(r, 10000));
 
 const d = await page.evaluate(() => {
@@ -79,12 +79,44 @@ const h2 = await page.evaluate(() => document.body.classList.contains('ui-hidden
 console.log(`H 键: 按1=${h1} 按2=${h2} ${(h1 && !h2) ? '✓' : '✗'}`);
 const hOk = h1 && !h2;
 
+// 自动巡礼（tour）断言
+const tourD = await page.evaluate(() => {
+  const dbg = window.__dbg;
+  if (!dbg || !dbg.tour) return { missing: true };
+  const t = dbg.tour;
+  const sjl = dbg.workMeshes.find(w => w.userData.w.n === '实践论');
+  const jtz = dbg.conceptMeshes.find(c => c.userData.nd && c.userData.nd.n === '教条主义');
+  let arcOk = false, arcPos = null;
+  if (sjl && jtz) {
+    const f = dbg.tourArcPos(sjl.position, jtz.position, 0);
+    arcOk = !!(f && isFinite(f.pos.x) && isFinite(f.pos.y) && isFinite(f.pos.z));
+    arcPos = f ? { dist: Math.round(Math.hypot(f.pos.x, f.pos.y, f.pos.z)), look: [Math.round(f.look.x), Math.round(f.look.y), Math.round(f.look.z)] } : null;
+  }
+  dbg.tourStart();
+  const startOk = t.active;
+  const stepsOk = t.steps.length === 5 && t.steps.map(s => s.kind).join(',') === 'hold,fly,arc,arc,overview';
+  dbg.tourCancel();
+  const cancelOk = !t.active;
+  return { stepsOk, nodesOk: !!(sjl && jtz), arcOk, arcPos, startOk, cancelOk };
+});
+console.log(`tour 断言: 步骤=${tourD.stepsOk ? '✓' : '✗'} 节点=${tourD.nodesOk ? '✓' : '✗'} 连线取景=${tourD.arcOk ? '✓' : '✗ ' + JSON.stringify(tourD.arcPos)} 启动=${tourD.startOk ? '✓' : '✗'} 打断=${tourD.cancelOk ? '✓' : '✗'}`);
+const tourOk = !tourD.missing && tourD.stepsOk && tourD.nodesOk && tourD.arcOk && tourD.startOk && tourD.cancelOk;
+
+// ?tour=1 自动启动
+const p2 = await browser.newPage();
+await p2.setViewport({ width: 1440, height: 900 });
+await p2.goto('file:///E:/双创知识库/wenshu-concept-galaxy/dist/concept_galaxy.html?tour=1', { waitUntil: 'load' });
+await new Promise(r => setTimeout(r, 4000));
+const tourAuto = await p2.evaluate(() => window.__dbg ? window.__dbg.tour.active : false);
+await p2.close();
+console.log(`?tour=1 自动启动: ${tourAuto ? '✓' : '✗'}`);
+
 console.log(`日心断言: 中心r=${d.mao?.r} 四环=${ringOk ? '✓' : '✗ ' + JSON.stringify(d.ringAvg)} 卫星p95=${d.satP95}`);
 console.log(`新增断言: Top12=${topOk ? '✓' : '✗ ' + d.topLabels} 加载屏=${splashOk ? '✓' : '✗ ' + d.splash} 引导=${guideOk ? '✓' : '✗ ' + d.guide}`);
 
-const ok = d.concepts === 1275 && d.works === 137 && d.refCount > 0 && d.mao && d.mao.hasHalo && d.mao.hasLabel && d.mao.color === '#ffd24d' && helioOk && topOk && splashOk && guideOk && hOk && d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30;
+const ok = d.concepts === 1275 && d.works === 137 && d.refCount > 0 && d.mao && d.mao.hasHalo && d.mao.hasLabel && d.mao.color === '#ffd24d' && helioOk && topOk && splashOk && guideOk && hOk && d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30 && tourOk && tourAuto;
 console.log(`[F] 恒星亮核: count=${d.starPt?.count} aSize=${d.starPt?.aSize} uBright=${d.starPt?.bright} ${(d.starPt && d.starPt.count === 1 && d.starPt.aSize > 30) ? '✓' : '✗'}`);
-console.log(ok ? '✅ 数值验证全部通过（含日心 + Top12 + 加载屏 + 引导 + H键 + 恒星亮核）' : '❌ 有断言失败');
+console.log(ok ? '✅ 数值验证全部通过（含日心 + Top12 + 加载屏 + 引导 + H键 + 恒星亮核 + 自动巡礼）' : '❌ 有断言失败');
 await page.screenshot({ path: 'shot_m4.png' });
 await browser.close();
 process.exit(ok ? 0 : 1);
