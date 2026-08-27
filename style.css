@@ -290,3 +290,13 @@ body.ui-hidden #guide {
   opacity: 0; pointer-events: none;
   transition: opacity .25s ease;
 }
+
+/* ===== 标题接入省赛叙事：品牌 + 主标题 + 副标题 三段式（格式同红旗渠，保持金色主题） ===== */
+.sp-logo { display: flex; align-items: baseline; gap: 10px; }
+.sp-brand { color: var(--gold); font-weight: 700; letter-spacing: .1em; }
+.sp-title { color: #fff; font-weight: 600; font-size: 26px; letter-spacing: .14em; }
+.sp-sub-title { color: var(--gold); font-size: 16px; letter-spacing: .08em; }
+
+#hud .brand b.b-brand { color: var(--gold); font-weight: 700; letter-spacing: .1em; white-space: nowrap; }
+#hud .brand .b-main { color: #fff; font-weight: 600; font-size: 15px; letter-spacing: .12em; white-space: nowrap; }
+#hud .brand small { margin-left: 2px; }
